@@ -552,7 +552,23 @@ show_troubleshooting_commands() {
     echo "   kubectl rollout restart deployment -n $namespace -l app.kubernetes.io/instance=$release_name"
 }
 
-# Function to expose SHO service with a LoadBalancer and verify it's online
+# Function to test if URL is accessible using curl
+test_url_accessible() {
+    local url="$1"
+    local timeout="${2:-10}"
+    
+    echo "🔍 Testing URL accessibility: $url"
+    
+    # Use curl to test if the URL is accessible
+    if curl -s -f --connect-timeout "$timeout" --max-time "$timeout" --head "$url" >/dev/null 2>&1; then
+        echo "✅ URL is accessible"
+        return 0
+    else
+        echo "⚠️  URL is not yet accessible"
+        return 1
+    fi
+}
+
 expose_sho_service() {
     local release_name="$1"
     local namespace="$2"
@@ -596,11 +612,12 @@ expose_sho_service() {
         fi
         
         if [ -n "${route_url}" ]; then 
+            local full_url="http://${route_url}:$port"
             echo "✅ LoadBalancer is ready!"
-            echo "🌐 The external URL for SHO is: http://${route_url}:$port"
+            echo "🌐 The external URL for SHO is: $full_url"
             echo ""
             echo "📝 To access SHO later:"
-            echo "   http://${route_url}:$port"
+            echo "   $full_url"
             echo ""
             echo "📋 To check status:"
             echo "   kubectl get svc $route_name -n $namespace"
@@ -608,28 +625,30 @@ expose_sho_service() {
             echo "🗑️ To remove this LoadBalancer:"
             echo "   kubectl delete svc $route_name -n $namespace"
             
-            # Try to open the URL in browser based on OS
+            # Wait for DNS record to propagate and service to start responding
             echo ""
-            echo "🌏 Attempting to open browser..."
+            echo "🔍 Checking if SHO console is responding..."
+            sleep 5
             
-            if command -v xdg-open &>/dev/null; then
-                # Linux with desktop environment
-                xdg-open "http://${route_url}:$port"
-            elif command -v gnome-open &>/dev/null; then
-                # Gnome desktop
-                gnome-open "http://${route_url}:$port"
-            elif command -v kde-open &>/dev/null; then
-                # KDE desktop
-                kde-open "http://${route_url}:$port"
-            elif command -v open &>/dev/null; then
-                # macOS
-                open "http://${route_url}:$port"
+            # Test URL accessibility before opening browser
+            if test_url_accessible "$full_url" 10; then
+                echo "🎉 SHO console is responding! Opening browser..."
+                
+                if command -v open &>/dev/null; then
+                    # macOS
+                    open "$full_url"
+                    echo "✅ Browser opened successfully"
+                    return 0
+                else
+                    echo "ℹ️ Could not detect a browser opener. Please open this URL manually:"
+                    echo "   $full_url"
+                fi
             else
-                echo "ℹ️ Could not detect a browser opener. Please open this URL manually:"
-                echo "   http://${route_url}:$port"
+                echo "⚠️  SHO console is not yet responding"
+                echo "ℹ️ The LoadBalancer is ready, but the application might still be starting up"
+                echo "📝 Please wait a few minutes and try accessing:"
+                continue
             fi
-            
-            return 0
         fi
         
         echo "   LoadBalancer not ready yet. Attempt $((attempts + 1))/$max_attempts - waiting 10 seconds..."
@@ -692,7 +711,12 @@ uninstall_sho() {
     else
         echo "ℹ️ No LoadBalancer service found"
     fi
-    
+
+    echo "Cleaning up resources..."
+    kubectl get selfhostedruntimes -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
+	kubectl get selfhostedvaultoperators -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
+	kubectl delete selfhostedruntime --ignore-not-found self-hosted-runtime || true
+
     # Uninstall the Helm release
     echo ""
     echo "🗑️ Uninstalling SHO Helm release..."
@@ -701,7 +725,21 @@ uninstall_sho() {
     
     if [ $? -eq 0 ]; then
         echo "✅ SHO release $release_name successfully uninstalled"
-        
+        echo "Waiting for resources to cleanup..."
+        sleep 30
+        kubectl get vaultroles.self-hosted-vault-operator.outsystemscloud.com -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
+        for ns in flux-sdlc sh-registry vault istio-system outsystems-gloo-system nats-auth nats2crd outsystems-gloo-system flux-system outsystems-prometheus outsystems-rbac-manager outsystems-stakater vault-operator seaweedfs authorization-services; do \
+            echo "Patching up namespace: $ns"; \
+            kubectl get helmcharts,helmreleases,kustomizations,helmrepositories -n $ns -o name | \
+            xargs -I{} kubectl patch {} -n $ns --type merge -p '{"metadata":{"finalizers":null}}'; \
+        done
+        sleep 10
+        for ns in flux-sdlc nats-auth sh-registry seaweedfs outsystems-otel outsystems-fluentbit outsystems-prometheus nats-auth nats-leaf authorization-services nats2crd; do \
+            echo "Cleaning up namespace: $ns"; \
+            kubectl get pods -n "$ns" -o name | \
+            xargs -I{} kubectl delete {} -n "$ns" --force; \
+        done
+
         echo "🗑️ Deleting namespace $NAMESPACE..."
         kubectl delete namespace "$NAMESPACE" --wait=false && kubectl delete namespace "$NAMESPACE_CRED_JOB" --wait=false 
             
