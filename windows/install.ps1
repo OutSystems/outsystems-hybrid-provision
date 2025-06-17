@@ -71,13 +71,8 @@ if (-not $Repository) {
 $IMAGE_REGISTRY = if ($env:IMAGE_REGISTRY) { $env:IMAGE_REGISTRY } else { "quay.io/rgi-sergio" }
 $IMAGE_REPOSITORY = "self-hosted-operator"
 $PUBLIC_REPO = $Public
-$IMAGE_PULL_SECRET = "azure-acr-pull-secret"
 
-# Temp variables to access SHTEMP ACR
-# TODO: Remove these variables when self hosted operator no longer will be using SHTEMP ACR
-$SHTEMP_ACR_USERNAME = if ($env:SP_ID) { $env:SP_ID } else { "" }
-$SHTEMP_ACR_PASSWORD = if ($env:SP_SECRET) { $env:SP_SECRET } else { "" }
-$SH_REGISTRY = "shtemp.azurecr.io"
+$SH_REGISTRY = ""
 
 # Set version
 $HELM_CHART_VERSION = if ($Version) { $Version } else { "latest" }
@@ -763,8 +758,6 @@ function Install-Sho {
             --set "image.registry=$IMAGE_REGISTRY" `
             --set "image.repository=$IMAGE_REPOSITORY" `
             --set "image.tag=$imageVersion" `
-            --set "registry.username=$SHTEMP_ACR_USERNAME" `
-            --set "registry.password=$SHTEMP_ACR_PASSWORD" `
             --set "registry.url=$SH_REGISTRY" `
             --set-string "podAnnotations.timestamp=$timestamp" 2>&1
         

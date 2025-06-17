@@ -13,14 +13,7 @@ IMAGE_REGISTRY=${IMAGE_REGISTRY:-"quay.io/rgi-sergio"}
 IMAGE_REPOSITORY="self-hosted-operator"
 PUBLIC_REPO="true"
 
-
-IMAGE_PULL_SECRET="azure-acr-pull-secret"
-
-# Temp variables to access SHTEMP ACR
-# TODO: Remove these variables when self hosted operator no longer will be using SHTEMP ACR
-SHTEMP_ACR_USERNAME=${SP_ID:-""}
-SHTEMP_ACR_PASSWORD=${SP_SECRET:-""}
-SH_REGISTRY="shtemp.azurecr.io"
+SH_REGISTRY=""
 
 # Function to check if Helm is installed
 check_helm_installed() {
@@ -273,8 +266,6 @@ sho_install() {
         --set image.registry="${IMAGE_REGISTRY}" \
         --set image.repository="${IMAGE_REPOSITORY}" \
         --set image.tag="${IMAGE_VERSION}" \
-        --set registry.username="$SHTEMP_ACR_USERNAME" \
-        --set registry.password="$SHTEMP_ACR_PASSWORD" \
         --set registry.url="$SH_REGISTRY" \
         --set-string podAnnotations.timestamp="$TIMESTAMP" \
         $HELM_SET_FLAGS 2>&1)
