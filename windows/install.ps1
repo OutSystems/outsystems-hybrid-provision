@@ -502,6 +502,44 @@ function Test-Dependencies {
     }
 }
 
+# Function to identify Kubernetes cluster type and set appropriate options
+function Invoke-ClusterIdentification {
+    Write-Host "[INFO] Identifying cluster type..." -ForegroundColor Cyan
+    
+    # Determine cluster type based on node labels
+    try {
+        $nodeLabels = kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' 2>$null
+        
+        if ($nodeLabels -match 'openshift') {
+            $script:CLUSTER_TYPE = "openshift"
+        } elseif ($nodeLabels -match 'azure') {
+            $script:CLUSTER_TYPE = "aks"
+        } elseif ($nodeLabels -match 'eks\.amazonaws\.com') {
+            $script:CLUSTER_TYPE = "eks"
+        } else {
+            $script:CLUSTER_TYPE = "unknown"
+        }
+        
+        Write-Host "[OK] Cluster type identified: $script:CLUSTER_TYPE" -ForegroundColor Green
+        
+        # Set Helm flags based on cluster type
+        if ($script:CLUSTER_TYPE -eq "openshift") {
+            $script:HELM_SET_FLAGS = "--set scc.create=true"
+        } else {
+            $script:HELM_SET_FLAGS = "--set scc.create=false"
+        }
+        
+        Write-Host "[INFO] Helm set flags: $script:HELM_SET_FLAGS" -ForegroundColor Gray
+        return $true
+    } catch {
+        Write-Host "[WARN] Failed to identify cluster type: $($_.Exception.Message)" -ForegroundColor Yellow
+        $script:CLUSTER_TYPE = "unknown"
+        $script:HELM_SET_FLAGS = "--set scc.create=false"
+        Write-Host "[INFO] Using default Helm flags: $script:HELM_SET_FLAGS" -ForegroundColor Gray
+        return $false
+    }
+}
+
 # Function to show usage
 function Show-Usage {
     Write-Host "Usage: .\install.ps1 [OPTIONS]" -ForegroundColor White
@@ -665,7 +703,8 @@ function Install-Sho {
     }
     
     Write-Host "[INFO] Running Helm install command..." -ForegroundColor Yellow
-    
+    Write-Host "Deploying with platform: $CLUSTER_TYPE" -ForegroundColor Yellow
+
     # Initialize variables to capture output
     $installOutput = ""
     $installExitCode = 0
@@ -685,6 +724,7 @@ function Install-Sho {
             --set "image.repository=$IMAGE_REPOSITORY" `
             --set "image.tag=$imageVersion" `
             --set "registry.url=$SH_REGISTRY" `
+            --set platform="$CLUSTER_TYPE"
             --set-string "podAnnotations.timestamp=$timestamp" 2>&1
         
         # Capture the exit code immediately
@@ -1285,6 +1325,9 @@ try {
             Write-Host "[INFO] Run '.\install.ps1 -Help' for usage information" -ForegroundColor Blue
             exit 1
         }
+        
+        # Identify cluster type
+        Invoke-ClusterIdentification
         
         Write-Host ""
         Write-Host "[INFO] Ready to install SHO!" -ForegroundColor Green

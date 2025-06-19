@@ -185,6 +185,33 @@ verify_repo_access() {
     fi
 }
 
+# Function to identify Kubernetes cluster type and set appropriate options
+identify_cluster() {
+    echo "🔍 Identifying cluster type..."
+    
+    # Determine cluster type based on node labels
+    if kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'openshift'; then
+        CLUSTER_TYPE="openshift"
+    elif kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'azure'; then
+        CLUSTER_TYPE="aks"
+    elif kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'eks.amazonaws.com'; then
+        CLUSTER_TYPE="eks"
+    else
+        CLUSTER_TYPE="unknown"
+    fi
+
+    echo "✅ Cluster type identified: $CLUSTER_TYPE"
+
+    # Set Helm flags based on cluster type
+    if [ "$CLUSTER_TYPE" = "openshift" ]; then
+        echo "🔧 Setting OpenShift specific options"
+        echo "   - Using SCC (Security Context Constraints)"
+        SCC_CREATION="true"
+    else
+        SCC_CREATION="false"
+    fi
+}
+
 # Function to show usage
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -224,6 +251,7 @@ sho_install() {
     kubectl create namespace $NAMESPACE_CRED_JOB 2>/dev/null || echo "Namespace $NAMESPACE_CRED_JOB already exists, skipping creation"
     
     echo "🔧 Running Helm install command..."
+    echo "Deploying with platform: ${CLUSTER_TYPE}"
     install_output=$(helm upgrade --install "$release_name" "$CHART_REPO" \
         --namespace $NAMESPACE \
         --create-namespace \
@@ -232,7 +260,8 @@ sho_install() {
         --set image.tag="${IMAGE_VERSION}" \
         --set registry.url="$SH_REGISTRY" \
         --set-string podAnnotations.timestamp="$TIMESTAMP" \
-        $HELM_SET_FLAGS 2>&1)
+        --set platform="${CLUSTER_TYPE}" \
+        --set scc.create="${SCC_CREATION}")
     install_exit_code=$?
     
     if [ $install_exit_code -eq 0 ]; then
@@ -783,6 +812,9 @@ if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
     check_dependencies
     
     if [ $? -eq 0 ]; then
+        echo ""
+        echo "🔍 Analyzing Kubernetes cluster..."
+        identify_cluster
         echo ""
         echo "🚀 Ready to install SHO!"
         sho_install
