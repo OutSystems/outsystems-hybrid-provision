@@ -36,6 +36,7 @@ jobs:
         id: next_version
         run: |
           current="${{ steps.get_tag.outputs.latest_tag }}"
+          current="${current:-v0.0.0}" # Fallback to v0.0.0 if no previous tags found
           IFS='.' read -r major minor patch <<< "${current#v}"
 
           case "${{ steps.bump.outputs.bump }}" in
