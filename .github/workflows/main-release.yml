@@ -1,0 +1,68 @@
+# .github/workflows/release.yml
+name: Release to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest version tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1 || echo "v0.0.0")
+          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          bump="patch"
+          git log ${{ steps.get_tag.outputs.latest_tag }}..HEAD --pretty=format:"%s" | while read msg; do
+            if echo "$msg" | grep -iq "semver major"; then bump="major"; break; fi
+            if echo "$msg" | grep -iq "semver minor"; then bump="minor"; fi
+          done
+          echo "bump=$bump" >> $GITHUB_OUTPUT
+
+      - name: Calculate next version
+        id: next_version
+        run: |
+          current="${{ steps.get_tag.outputs.latest_tag }}"
+          IFS='.' read -r major minor patch <<< "${current#v}"
+
+          case "${{ steps.bump.outputs.bump }}" in
+            major) ((major++)); minor=0; patch=0 ;;
+            minor) ((minor++)); patch=0 ;;
+            patch) ((patch++)) ;;
+          esac
+
+          new_version="v$major.$minor.$patch"
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          echo "Next version: $new_version"
+
+      - name: Create Git tag and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag ${{ steps.next_version.outputs.new_version }}
+          git push origin ${{ steps.next_version.outputs.new_version }}
+
+      - name: Upload release to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.next_version.outputs.new_version }}
+          name: Release ${{ steps.next_version.outputs.new_version }}
+          files: |
+            linux/install.sh
+            macos/install.sh
+            windows/install.ps1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
