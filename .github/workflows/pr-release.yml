@@ -1,0 +1,27 @@
+# .github/workflows/pr-preview.yml
+name: PR Preview (Non-Prod)
+
+on:
+  pull_request:
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare preview folder
+        run: |
+          mkdir -p out/non-prod
+          cp linux/install.sh out/non-prod/linux-install.sh
+          cp macos/install.sh out/non-prod/macos-install.sh
+          cp windows/install.ps1 out/non-prod/windows-install.ps1
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: out
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v2
