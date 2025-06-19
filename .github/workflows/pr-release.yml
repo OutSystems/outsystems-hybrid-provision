@@ -19,9 +19,9 @@ jobs:
       - name: Prepare preview folder
         run: |
           mkdir -p out/non-prod
-          cp linux/install.sh out/non-prod/linux-install.sh
-          cp macos/install.sh out/non-prod/macos-install.sh
-          cp windows/install.ps1 out/non-prod/windows-install.ps1
+          cp linux/install.sh out/non-prod/linux/install.sh
+          cp macos/install.sh out/non-prod/macos/install.sh
+          cp windows/install.ps1 out/non-prod/windows/install.ps1
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
