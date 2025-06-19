@@ -4,6 +4,11 @@ name: PR (Non-Prod)
 on:
   pull_request:
 
+permissions:
+  id-token: write
+  contents: read
+  pages: write
+
 jobs:
   deploy-non-prod:
     runs-on: ubuntu-latest
