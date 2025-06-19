@@ -4,7 +4,6 @@
 param(
     [string]$Version,
     [string]$Repository,
-    [string]$Public = "true",
     [switch]$Uninstall,
     [switch]$Help,
     [switch]$LocalInstall
@@ -70,7 +69,6 @@ if (-not $Repository) {
 
 $IMAGE_REGISTRY = if ($env:IMAGE_REGISTRY) { $env:IMAGE_REGISTRY } else { "quay.io/rgi-sergio" }
 $IMAGE_REPOSITORY = "self-hosted-operator"
-$PUBLIC_REPO = $Public
 
 $SH_REGISTRY = ""
 
@@ -436,14 +434,7 @@ function Test-RepoAccess {
             }
             return $true
         } else {
-            # Check if this might be an authentication issue
-            if ($outputString -match "unauthorized|authentication|login" -or 
-                $outputString -match "401|403") {
-                Write-Host "[ERROR] Authentication required to access repository" -ForegroundColor Red
-                Write-Host "[INFO] Try setting REGISTRY_USERNAME and REGISTRY_PASSWORD environment variables" -ForegroundColor Yellow
-            } else {
-                Write-Host "[ERROR] Cannot access OutSystems repository or no charts found" -ForegroundColor Red
-            }
+            Write-Host "[ERROR] Cannot access OutSystems repository or no charts found" -ForegroundColor Red
             
             # Only show output if it's not too verbose and might be helpful
             if ($outputString.Length -lt 500 -and $outputString -notmatch "^$") {
@@ -456,55 +447,6 @@ function Test-RepoAccess {
         Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
-}
-
-# Function to login to repository
-function Invoke-RepoLogin {
-    Write-Host "[INFO] Logging in to SHO private repository" -ForegroundColor Cyan
-    
-    # Handle authentication if credentials are provided
-    $registryUsername = $env:REGISTRY_USERNAME
-    $registryPassword = $env:REGISTRY_PASSWORD
-    
-    if ($registryUsername -and $registryPassword) {
-        Write-Host "[INFO] Credentials provided, authenticating with SHO registry..." -ForegroundColor Yellow
-        try {
-            # For OCI registries, we need to login to the registry hostname, not the full chart path
-            # Extract registry hostname from CHART_REPO (e.g., "oci://quay.io/rgi-sergio/helm/self-hosted-operator" -> "quay.io")
-            $registryHost = ""
-            if ($CHART_REPO -match "oci://([^/]+)") {
-                $registryHost = $matches[1]
-            } else {
-                # Fallback: use the full CHART_REPO
-                $registryHost = $CHART_REPO
-            }
-            
-            Write-Host "[INFO] Authenticating with registry: $registryHost" -ForegroundColor Gray
-            
-            # Use --password-stdin for secure password passing
-            $loginResult = $registryPassword | helm registry login $registryHost --username $registryUsername --password-stdin 2>&1
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] Successfully authenticated with OCI registry" -ForegroundColor Green
-                return $true
-            } else {
-                Write-Host "[ERROR] Authentication failed" -ForegroundColor Red
-                # Only show login error if it's not too verbose
-                $errorString = $loginResult -join " "
-                if ($errorString.Length -lt 300) {
-                    Write-Host "Login error: $errorString" -ForegroundColor Red
-                }
-                return $false
-            }
-        } catch {
-            Write-Host "[ERROR] Authentication failed: $($_.Exception.Message)" -ForegroundColor Red
-            return $false
-        }
-    } else {
-        Write-Host "[INFO] No credentials provided, set REGISTRY_USERNAME and REGISTRY_PASSWORD environment variables to authenticate or set PUBLIC_REPO to true for public access" -ForegroundColor Blue
-    }
-    
-    return $true
 }
 
 # Function to check all dependencies
@@ -567,7 +509,6 @@ function Show-Usage {
     Write-Host "Options:" -ForegroundColor Yellow
     Write-Host "  -Version VERSION         The SHO chart version to install (optional, defaults to latest)" -ForegroundColor Gray
     Write-Host "  -Repository REPO_URL     The SHO registry URL (optional, uses default if not specified)" -ForegroundColor Gray
-    Write-Host "  -Public true/false       Whether to use public repository access (optional, defaults to true)" -ForegroundColor Gray
     Write-Host "  -LocalInstall            Install tools locally in current directory (no admin privileges required)" -ForegroundColor Gray
     Write-Host "  -Uninstall               Uninstall OutSystems Self-Hosted Operator" -ForegroundColor Gray
     Write-Host "  -Help                    Show this help message" -ForegroundColor Gray
@@ -576,32 +517,17 @@ function Show-Usage {
     Write-Host "  .\install.ps1" -ForegroundColor Gray
     Write-Host "  .\install.ps1 -LocalInstall" -ForegroundColor Gray
     Write-Host "  .\install.ps1 -Version 1.2.3" -ForegroundColor Gray
-    Write-Host "  .\install.ps1 -Repository private-registry.example.com -Public false -LocalInstall" -ForegroundColor Gray
-    Write-Host "  .\install.ps1 -Version 1.2.3 -Repository private-registry.example.com -Public false" -ForegroundColor Gray
+    Write-Host "  .\install.ps1 -Repository registry.example.com" -ForegroundColor Gray
+    Write-Host "  .\install.ps1 -Version 1.2.3 -Repository registry.example.com" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Installation Modes:" -ForegroundColor Yellow
     Write-Host "  Default:      Tries system-wide installation (requires admin privileges)" -ForegroundColor Gray
     Write-Host "  -LocalInstall: Installs tools in ./tools/ directory (no admin privileges required)" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "Environment Variables (optional for private repositories):" -ForegroundColor Yellow
-    Write-Host "  REGISTRY_USERNAME  Username for SHO registry authentication" -ForegroundColor Gray
-    Write-Host "  REGISTRY_PASSWORD  Password for SHO registry authentication" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "Authentication Examples:" -ForegroundColor Yellow
-    Write-Host "  # Public repository (default)" -ForegroundColor Gray
-    Write-Host "  .\install.ps1" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  # Private repository with authentication (local install)" -ForegroundColor Gray
-    Write-Host "  `$env:REGISTRY_USERNAME='myuser'" -ForegroundColor Gray
-    Write-Host "  `$env:REGISTRY_PASSWORD='mypassword'" -ForegroundColor Gray
-    Write-Host "  .\install.ps1 -Repository private-registry.example.com -Public false -LocalInstall" -ForegroundColor Gray
-    Write-Host ""
     Write-Host "Local Installation Notes:" -ForegroundColor Blue
     Write-Host "  - Tools are installed in ./tools/ directory" -ForegroundColor Gray
     Write-Host "  - Run '. .\tools\setup-path.ps1' to add tools to PATH in new sessions" -ForegroundColor Gray
     Write-Host "  - No administrator privileges required" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "Note: When -Public false, you must provide REGISTRY_USERNAME and REGISTRY_PASSWORD environment variables." -ForegroundColor Blue
 }
 
 # Function to check SHO pods status
@@ -811,10 +737,7 @@ function Install-Sho {
             }
             
             # Parse specific error types
-            if ($outputString -match "401.*Unauthorized|unauthorized|authentication") {
-                Write-Host ""
-                Write-Host "[INFO] Authentication issue. Check your credentials." -ForegroundColor Blue
-            } elseif ($outputString -match "already exists") {
+            if ($outputString -match "already exists") {
                 Write-Host ""
                 Write-Host "[INFO] Release already exists. Use a different name or uninstall the existing release." -ForegroundColor Blue
             } elseif ($outputString -match "no such host|connection refused") {
@@ -1342,28 +1265,10 @@ try {
         }
     }
     
-    # Validate private repository access
-    if ($PUBLIC_REPO -eq "false" -and -not $env:REGISTRY_USERNAME) {
-        Write-Host "[ERROR] Private repository access requires REGISTRY_USERNAME and REGISTRY_PASSWORD environment variables" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Set credentials before running:" -ForegroundColor Yellow
-        Write-Host "  `$env:REGISTRY_USERNAME='your-username'" -ForegroundColor Gray
-        Write-Host "  `$env:REGISTRY_PASSWORD='your-password'" -ForegroundColor Gray
-        Write-Host ""
-        Show-Usage
-        exit 1
-    }
-    
     # Show current configuration
     Write-Host "=== Configuration ===" -ForegroundColor White
     Write-Host "Repository URL: $CHART_REPO" -ForegroundColor Gray
     Write-Host "Version: $HELM_CHART_VERSION" -ForegroundColor Gray
-    Write-Host "Public Access: $PUBLIC_REPO" -ForegroundColor Gray
-    if ($env:REGISTRY_USERNAME) {
-        Write-Host "Authentication: configured" -ForegroundColor Gray
-    } else {
-        Write-Host "Authentication: not configured" -ForegroundColor Gray
-    }
     Write-Host ""
     
     if ($Uninstall) {
@@ -1373,12 +1278,6 @@ try {
         }
     } else {
         Write-Host "=== OutSystems Self-Hosted Operator Installation Dependencies Check ===" -ForegroundColor White
-        
-        if ($PUBLIC_REPO -ne "true") {
-            if (-not (Invoke-RepoLogin)) {
-                exit 1
-            }
-        }
         
         if (-not (Test-Dependencies)) {
             Write-Host ""

@@ -11,9 +11,8 @@ HELM_REPO_URL=${HELM_REPO_URL:-"oci://quay.io/rgi-sergio/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-"quay.io/rgi-sergio"}
 IMAGE_REPOSITORY="self-hosted-operator"
-PUBLIC_REPO="true"
 
-SH_REGISTRY=""
+SH_REGISTRY=${SH_REGISTRY:-""}
 
 # Function to check if Helm is installed
 check_helm_installed() {
@@ -127,25 +126,6 @@ check_dependencies() {
     fi
 }
 
-repo_login() {
-    echo "🔍 Logging in to SHO private repository"
-    
-    # Handle authentication if credentials are provided
-    if [ -n "$REGISTRY_USERNAME" ] && [ -n "$REGISTRY_PASSWORD" ]; then
-        echo "🔑 Credentials provided, authenticating with SHO registry..."
-        if echo "$REGISTRY_PASSWORD" | helm registry login "$CHART_REPO" --username "$REGISTRY_USERNAME" --password-stdin 2>/dev/null; then
-            echo "✅ Successfully authenticated with OCI registry"
-        else
-            echo "❌ Authentication failed"
-            return 1
-        fi
-    else
-        echo "ℹ️ No credentials provided, set REGISTRY_USERNAME and REGISTRY_PASSWORD environment variables to authenticate or set PUBLIC_REPO to true for public access"
-    fi
-    
-    return 0
-}
-
 # Function to verify repository access and list available charts
 verify_repo_access() {    
     echo "🔍 Verifying repository access"
@@ -169,30 +149,14 @@ show_usage() {
     echo "Options:"
     echo "  --version=VERSION        The SHO chart version to install (optional, defaults to latest)"
     echo "  --repository=REPO_URL    The SHO registry URL (optional, uses default if not specified)"
-    echo "  --public=true/false      Whether to use public repository access (optional, defaults to true)"
     echo "  --uninstall              Uninstall OutSystems Self-Hosted Operator"
     echo "  --help, -h               Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0"
     echo "  $0 --version=1.2.3"
-    echo "  $0 --repository=private-registry.example.com --public=false"
-    echo "  $0 --version=1.2.3 --repository=private-registry.example.com --public=false"
-    echo ""
-    echo "Environment Variables (optional for private repositories):"
-    echo "  REGISTRY_USERNAME  Username for SHO registry authentication"
-    echo "  REGISTRY_PASSWORD  Password for SHO registry authentication"
-    echo ""
-    echo "Authentication Examples:"
-    echo "  # Public repository (default)"
-    echo "  $0 or $0 --repository=$HELM_REPO_URL --public=true"
-    echo ""
-    echo "  # Private repository with authentication"
-    echo "  export REGISTRY_USERNAME=myuser"
-    echo "  export REGISTRY_PASSWORD=mypassword"
-    echo "  $0 --repository=private-registry.example.com --public=false"
-    echo ""
-    echo "Note: When --public=false, you must provide REGISTRY_USERNAME and REGISTRY_PASSWORD environment variables."
+    echo "  $0 --repository=registry.example.com"
+    echo "  $0 --version=1.2.3 --repository=registry.example.com"
 }
 
 # Function to install OutSystems Self-Hosted Operator
@@ -253,10 +217,7 @@ sho_install() {
         echo "$install_output"
         
         # Parse specific error types
-        if echo "$install_output" | grep -q "401.*Unauthorized"; then
-            echo ""
-            echo "💡 Authentication issue. Check your credentials."
-        elif echo "$install_output" | grep -q "already exists"; then
+        if echo "$install_output" | grep -q "already exists"; then
             echo ""
             echo "💡 Release already exists. Use a different name or uninstall the existing release."
         elif echo "$install_output" | grep -q "no such host\|connection refused"; then
@@ -442,21 +403,37 @@ show_troubleshooting_commands() {
     echo "   kubectl rollout restart deployment -n $namespace -l app.kubernetes.io/instance=$release_name"
 }
 
-# Function to test if URL is accessible using curl
+# Function to test if URL is accessible using curl with retries
 test_url_accessible() {
     local url="$1"
-    local timeout="${2:-10}"
+    local timeout=10
+    local max_tries=10  # Default to 6 tries (1 minute with 10s intervals)
+    local retry_interval=10    # Wait 5 seconds between retries
+    local try=1
     
     echo "🔍 Testing URL accessibility: $url"
+    echo "   Will try up to $max_tries times with ${retry_interval}s intervals"
     
-    # Use curl to test if the URL is accessible
-    if curl -s -f --connect-timeout "$timeout" --max-time "$timeout" --head "$url" >/dev/null 2>&1; then
-        echo "✅ URL is accessible"
-        return 0
-    else
-        echo "⚠️  URL is not yet accessible"
-        return 1
-    fi
+    while [ $try -le $max_tries ]; do
+        echo "   Attempt $try/$max_tries..."
+        
+        # Use curl to test if the URL is accessible
+        if curl -s -f --connect-timeout "$timeout" --max-time "$timeout" --head "$url" >/dev/null 2>&1; then
+            echo "✅ URL is accessible after $try attempt(s)"
+            return 0
+        else
+            if [ $try -lt $max_tries ]; then
+                echo "   ⏳ URL not accessible yet, waiting ${retry_interval}s before next attempt..."
+                sleep $retry_interval
+            else
+                echo "⚠️  URL is not accessible after $max_tries attempts"
+            fi
+        fi
+        
+        try=$((try + 1))
+    done
+    
+    return 1
 }
 
 # Function to expose SHO service with a LoadBalancer and verify it's online
@@ -519,6 +496,7 @@ expose_sho_service() {
             # Wait for DNS record to propagate and service to start responding
             echo ""
             echo "🔍 Checking if SHO console is responding..."
+            echo "⏳ Waiting for DNS record to propagate..."
             sleep 5
             
             # Test URL accessibility before opening browser
@@ -529,7 +507,6 @@ expose_sho_service() {
                     # macOS
                     open "$full_url"
                     echo "✅ Browser opened successfully"
-                    return 0
                 else
                     echo "ℹ️ Could not detect a browser opener. Please open this URL manually:"
                     echo "   $full_url"
@@ -538,8 +515,14 @@ expose_sho_service() {
                 echo "⚠️  SHO console is not yet responding"
                 echo "ℹ️ The LoadBalancer is ready, but the application might still be starting up"
                 echo "📝 Please wait a few minutes and try accessing:"
-                continue
+                echo "   $full_url"
+                echo ""
+                echo "🔍 You can check the pod status with:"
+                echo "   kubectl get pods -n $namespace -l app.kubernetes.io/instance=$release_name"
+                echo "   kubectl logs -n $namespace -l app.kubernetes.io/instance=$release_name --tail=20"
             fi
+            
+            return 0
         fi
         
         echo "   LoadBalancer not ready yet. Attempt $((attempts + 1))/$max_attempts - waiting 10 seconds..."
@@ -605,8 +588,8 @@ uninstall_sho() {
     
     echo "Cleaning up resources..."
     kubectl get selfhostedruntimes -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
-	kubectl get selfhostedvaultoperators -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
-	kubectl delete selfhostedruntime --ignore-not-found self-hosted-runtime || true
+    kubectl get selfhostedvaultoperators -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
+    kubectl delete selfhostedruntime --ignore-not-found self-hosted-runtime || true
 
     # Uninstall the Helm release
     echo ""
@@ -668,21 +651,6 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
                 echo "📝 Using repository: $CUSTOM_REPO"
                 shift
                 ;;
-            --public=*)
-                PUBLIC_REPO_ARG="${1#*=}"
-                if [[ "$PUBLIC_REPO_ARG" == "true" ]]; then
-                    PUBLIC_REPO="true"
-                    echo "📝 Using public repository access"
-                elif [[ "$PUBLIC_REPO_ARG" == "false" ]]; then
-                    PUBLIC_REPO="false"
-                    echo "📝 Using private repository access"
-                else
-                    echo "❌ Error: --public must be 'true' or 'false'"
-                    show_usage
-                    exit 1
-                fi
-                shift
-                ;;
             --help|-h)
                 show_usage
                 exit 0
@@ -707,56 +675,39 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
         export HELM_CHART_VERSION="latest"
     fi
     
-    # Validate private repository access
-    if [ "$PUBLIC_REPO" = "false" ] && [ -z "$REGISTRY_USERNAME" ]; then
-        echo "❌ Error: Private repository access requires REGISTRY_USERNAME and REGISTRY_PASSWORD environment variables"
-        echo ""
-        echo "Set credentials before running:"
-        echo "  export REGISTRY_USERNAME=your-username"
-        echo "  export REGISTRY_PASSWORD=your-password"
-        echo ""
-        show_usage
-        exit 1
-    fi
-    
     # Show current configuration
     echo "=== Configuration ==="
     echo "Repository URL: ${CHART_REPO}"
     echo "Version: ${HELM_CHART_VERSION}"
-    echo "Public Access: ${PUBLIC_REPO}"
-    echo "Authentication: ${REGISTRY_USERNAME:+'configured'}${REGISTRY_USERNAME:-'not configured'}"
     echo ""
     
     if [ "$UNINSTALL_MODE" = true ]; then
         echo "🗑️ Uninstalling OutSystems Self-Hosted Operator..."
         uninstall_sho "$CHART_NAME" "$NAMESPACE"
     else
-    echo "=== OutSystems Self-Hosted Operator Installation Dependencies Check ==="
-    if [ "$PUBLIC_REPO" != "true" ]; then
-        repo_login
-    fi
-    check_dependencies
-    
-    if [ $? -eq 0 ]; then
-        echo ""
-        echo "🚀 Ready to install SHO!"
-        sho_install
-        expose_sho_service "$CHART_NAME" "$NAMESPACE"
-        echo ""
-        echo "🎉 OutSystems Self-Hosted Operator was successfully installed!"
-        echo ""
-        echo "Your OutSystems Self-Hosted environment is now ready for use."
-        echo "📊 Management Commands:"
-        echo "   helm status $CHART_NAME -n $NAMESPACE"
-        echo "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$release_name"
-        echo ""
-        echo "🗑️  To uninstall:"
-        echo "   $0 --uninstall"
-    else
-        echo ""
-        echo "💥 Please resolve dependency issues before proceeding"
-        echo "💡 Run '$0 --help' for usage information"
-        exit 1
-    fi
+        echo "=== OutSystems Self-Hosted Operator Installation Dependencies Check ==="
+        check_dependencies
+        
+        if [ $? -eq 0 ]; then
+            echo ""
+            echo "🚀 Ready to install SHO!"
+            sho_install
+            expose_sho_service "$CHART_NAME" "$NAMESPACE"
+            echo ""
+            echo "🎉 OutSystems Self-Hosted Operator was successfully installed!"
+            echo ""
+            echo "Your OutSystems Self-Hosted environment is now ready for use."
+            echo "📊 Management Commands:"
+            echo "   helm status $CHART_NAME -n $NAMESPACE"
+            echo "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$release_name"
+            echo ""
+            echo "🗑️  To uninstall:"
+            echo "   $0 --uninstall"
+        else
+            echo ""
+            echo "💥 Please resolve dependency issues before proceeding"
+            echo "💡 Run '$0 --help' for usage information"
+            exit 1
+        fi
     fi
 fi
