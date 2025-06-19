@@ -14,19 +14,28 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Get latest version tag
         id: get_tag
         run: |
-          git fetch --tags
+          echo "Fetching latest tag..."
           tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1); tag=${tag:-v0.0.0}
           echo "latest_tag=$tag" >> $GITHUB_OUTPUT
 
       - name: Determine version bump
         id: bump
         run: |
+          latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+          if git rev-parse "$latest_tag" >/dev/null 2>&1; then
+            range="$latest_tag..HEAD"
+          else
+            echo "No valid tag found, analyzing all commits"
+            range="HEAD"
+          fi
+
           bump="patch"
-          git log ${{ steps.get_tag.outputs.latest_tag }}..HEAD --pretty=format:"%s" | while read msg; do
+          git log "$range" --pretty=format:"%s" | while read -r msg; do
             if echo "$msg" | grep -iq "semver major"; then bump="major"; break; fi
             if echo "$msg" | grep -iq "semver minor"; then bump="minor"; fi
           done
@@ -35,19 +44,42 @@ jobs:
       - name: Calculate next version
         id: next_version
         run: |
+          set -e
           current="${{ steps.get_tag.outputs.latest_tag }}"
           current="${current:-v0.0.0}" # Fallback to v0.0.0 if no previous tags found
-          IFS='.' read -r major minor patch <<< "${current#v}"
+          
+          # Remove 'v' prefix and split version
+          version_number="${current#v}"
+          IFS='.' read -r major minor patch <<< "$version_number"
+          
+          echo "Current version: $major.$minor.$patch"
+          
+          bump="${{ steps.bump.outputs.bump }}"
+          echo "Bump type: $bump"
 
-          case "${{ steps.bump.outputs.bump }}" in
-            major) ((major++)); minor=0; patch=0 ;;
-            minor) ((minor++)); patch=0 ;;
-            patch) ((patch++)) ;;
+          # Calculate new version using arithmetic expansion
+          case "$bump" in
+            major) 
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor) 
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch) 
+              patch=$((patch + 1))
+              ;;
+            *) 
+              echo "Unknown bump type: '$bump'"
+              exit 1
+              ;;
           esac
 
           new_version="v$major.$minor.$patch"
-          echo "new_version=$new_version" >> $GITHUB_OUTPUT
           echo "Next version: $new_version"
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Create Git tag and push
         run: |
