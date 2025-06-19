@@ -19,7 +19,7 @@ jobs:
         id: get_tag
         run: |
           git fetch --tags
-          tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1 || echo "v0.0.0")
+          tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1); tag=${tag:-v0.0.0}
           echo "latest_tag=$tag" >> $GITHUB_OUTPUT
 
       - name: Determine version bump
