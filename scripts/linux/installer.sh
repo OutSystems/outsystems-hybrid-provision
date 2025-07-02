@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 
 set -e
 
@@ -7,12 +7,21 @@ NAMESPACE="self-hosted-operator"
 NAMESPACE_CRED_JOB="self-hosted-registry-credentials-job"
 
 CHART_NAME="self-hosted-operator"
-HELM_REPO_URL=${HELM_REPO_URL:-"oci://quay.io/rgi-sergio/helm"}
+HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
-IMAGE_REGISTRY=${IMAGE_REGISTRY:-"quay.io/rgi-sergio"}
+IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
 IMAGE_REPOSITORY="self-hosted-operator"
 
 SH_REGISTRY=${SH_REGISTRY:-""}
+
+# Setup environment configs
+if [[ $ENV == "production" ]]; then
+    echo "🔧 Setting environment to production"
+    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/j0s5s8b0/ga/helm"}
+    CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
+    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/j0s5s8b0/ga"}
+
+fi
 
 # Function to check if Helm is installed
 check_helm_installed() {
@@ -30,38 +39,81 @@ check_helm_installed() {
 install_helm() {
     echo "🚀 Installing Helm..."
     
-    # Check if Homebrew is available
-    if command -v brew &> /dev/null; then
-        echo "📦 Installing Helm via Homebrew..."
-        brew install helm
+    # Detect Linux distribution type
+    if command -v apt-get &> /dev/null; then
+        echo "📦 Detected Debian-based distribution (apt)"
+        
+        # First try to install via apt
+        echo "📦 Attempting to install Helm via apt..."
+        sudo apt-get update
+        sudo apt-get install -y apt-transport-https gnupg
+        
+        curl https://baltocdn.com/helm/signing.asc | sudo apt-key add -
+        echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+        sudo apt-get update
+        sudo apt-get install -y helm
         
         if [ $? -eq 0 ]; then
-            echo "✅ Helm installed successfully via Homebrew"
+            echo "✅ Helm installed successfully via apt"
             helm version --short
             return 0
         else
-            echo "❌ Failed to install Helm via Homebrew"
-            return 1
+            echo "❌ Failed to install Helm via apt"
+            echo "📦 Falling back to script installation..."
         fi
+    elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+        echo "📦 Detected Red Hat-based distribution (yum/dnf)"
+        
+        # Determine which package manager to use
+        PKG_MANAGER="yum"
+        if command -v dnf &> /dev/null; then
+            PKG_MANAGER="dnf"
+        fi
+        
+        echo "📦 Attempting to install Helm via $PKG_MANAGER..."
+        
+        # Add Helm repository
+        sudo $PKG_MANAGER install -y epel-release
+        
+        # Install Helm
+        if [ "$PKG_MANAGER" = "dnf" ]; then
+            # For Fedora/newer RHEL
+            sudo $PKG_MANAGER install -y helm
+        else
+            # For CentOS/RHEL
+            curl -fsSL -o helm-stable-repo.rpm https://github.com/helm/helm/releases/download/v3.12.0/helm-3.12.0-1.el7.x86_64.rpm
+            sudo $PKG_MANAGER install -y ./helm-stable-repo.rpm
+            rm -f helm-stable-repo.rpm
+        fi
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ Helm installed successfully via $PKG_MANAGER"
+            helm version --short
+            return 0
+        else
+            echo "❌ Failed to install Helm via $PKG_MANAGER"
+            echo "📦 Falling back to script installation..."
+        fi
+    fi
+    
+    # Fall back to using the official script for all distributions
+    echo "📦 Installing Helm via official script..."
+    
+    # Download and install Helm using the official script
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    ./get_helm.sh
+    
+    # Clean up the script
+    rm -f get_helm.sh
+    
+    if command -v helm &> /dev/null; then
+        echo "✅ Helm installed successfully via script"
+        helm version --short
+        return 0
     else
-        echo "📦 Homebrew not found. Installing Helm via script..."
-        
-        # Download and install Helm using the official script
-        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-        
-        # Clean up the script
-        rm -f get_helm.sh
-        
-        if command -v helm &> /dev/null; then
-            echo "✅ Helm installed successfully via script"
-            helm version --short
-            return 0
-        else
-            echo "❌ Failed to install Helm via script"
-            return 1
-        fi
+        echo "❌ Failed to install Helm via script"
+        return 1
     fi
 }
 
@@ -208,7 +260,7 @@ sho_install() {
     kubectl create namespace $NAMESPACE_CRED_JOB 2>/dev/null || echo "Namespace $NAMESPACE_CRED_JOB already exists, skipping creation"
     
     echo "🔧 Running Helm install command..."
-    echo "🚀 Deploying with platform: ${CLUSTER_TYPE}"
+    echo "Deploying with platform: ${CLUSTER_TYPE}"
     install_output=$(helm upgrade --install "$release_name" "$CHART_REPO" \
         --namespace $NAMESPACE \
         --create-namespace \
@@ -258,70 +310,128 @@ sho_install() {
     fi
 }
 
-# Function to install kubectl on macOS
+# Function to install kubectl on Linux
 install_kubectl() {
     echo "🚀 Installing kubectl..."
     
-    # Check if Homebrew is available
-    if command -v brew &> /dev/null; then
-        echo "📦 Installing kubectl via Homebrew..."
-        brew install kubectl
+    # Detect Linux distribution type
+    if command -v apt-get &> /dev/null; then
+        echo "📦 Detected Debian-based distribution (apt)"
+        
+        echo "📦 Updating package lists..."
+        sudo apt-get update
+        
+        echo "📦 Installing kubectl via apt..."
+        # Add Kubernetes apt repository and install
+        sudo apt-get install -y apt-transport-https ca-certificates curl
+        
+        # Download the Google Cloud public signing key
+        sudo curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg || sudo mkdir -p /etc/apt/keyrings && sudo curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        
+        # Add the Kubernetes apt repository
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+        
+        # Update apt package index with the new repository
+        sudo apt-get update
+        
+        # Install kubectl
+        sudo apt-get install -y kubectl
         
         if [ $? -eq 0 ]; then
-            echo "✅ kubectl installed successfully via Homebrew"
+            echo "✅ kubectl installed successfully via apt"
             kubectl version --client --short 2>/dev/null || echo "   kubectl client installed"
             return 0
         else
-            echo "❌ Failed to install kubectl via Homebrew"
+            echo "❌ Failed to install kubectl via apt"
+            echo "📦 Attempting installation via direct download..."
+        fi
+    elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+        echo "📦 Detected Red Hat-based distribution (yum/dnf)"
+        
+        # Determine which package manager to use
+        PKG_MANAGER="yum"
+        if command -v dnf &> /dev/null; then
+            PKG_MANAGER="dnf"
+        fi
+        
+        # Add Kubernetes repository
+        echo "[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg" | sudo tee /etc/yum.repos.d/kubernetes.repo
+        
+        # Install kubectl
+        sudo $PKG_MANAGER install -y kubectl
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ kubectl installed successfully via $PKG_MANAGER"
+            kubectl version --client --short 2>/dev/null || echo "   kubectl client installed"
+            return 0
+        else
+            echo "❌ Failed to install kubectl via $PKG_MANAGER"
+            echo "📦 Attempting installation via direct download..."
+        fi
+    else
+        echo "📦 Unable to detect package manager. Using direct download method..."
+    fi
+    
+    # Fall back to direct binary download if repository installation fails
+    echo "📦 Installing kubectl via direct download..."
+    
+    # Get the latest stable version
+    local kubectl_version
+    kubectl_version=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+    
+    if [ -z "$kubectl_version" ]; then
+        echo "❌ Failed to get kubectl version"
+        return 1
+    fi
+    
+    echo "📥 Downloading kubectl $kubectl_version..."
+    
+    # Get architecture
+    ARCH=$(uname -m)
+    case $ARCH in
+        x86_64) ARCH="amd64" ;;
+        aarch64) ARCH="arm64" ;;
+        armv7l) ARCH="arm" ;;
+        *) echo "❌ Unsupported architecture: $ARCH"; return 1 ;;
+    esac
+    
+    # Download kubectl binary for Linux
+    if curl -LO "https://dl.k8s.io/release/$kubectl_version/bin/linux/${ARCH}/kubectl" &> /dev/null; then
+        echo "✅ kubectl downloaded successfully"
+        
+        # Make it executable
+        chmod +x kubectl
+        
+        # Move to a directory in PATH (try /usr/local/bin first, then ~/bin)
+        if sudo mv kubectl /usr/local/bin/ 2>/dev/null; then
+            echo "✅ kubectl installed to /usr/local/bin/"
+        elif mkdir -p ~/bin && mv kubectl ~/bin/ && export PATH="$HOME/bin:$PATH"; then
+            echo "✅ kubectl installed to ~/bin/"
+            echo "ℹ️  Added ~/bin to PATH for this session"
+            echo "   Add 'export PATH=\"\$HOME/bin:\$PATH\"' to your shell profile for permanent access"
+        else
+            echo "❌ Failed to install kubectl to system PATH"
+            echo "   You may need to run with sudo or install manually"
+            return 1
+        fi
+        
+        # Verify installation
+        if command -v kubectl &> /dev/null; then
+            echo "✅ kubectl installed successfully"
+            kubectl version --client --short 2>/dev/null || echo "   kubectl client ready"
+            return 0
+        else
+            echo "❌ kubectl installation verification failed"
             return 1
         fi
     else
-        echo "📦 Homebrew not found. Installing kubectl via direct download..."
-        
-        # Get the latest stable version
-        local kubectl_version
-        kubectl_version=$(curl -L -s https://dl.k8s.io/release/stable.txt)
-        
-        if [ -z "$kubectl_version" ]; then
-            echo "❌ Failed to get kubectl version"
-            return 1
-        fi
-        
-        echo "📥 Downloading kubectl $kubectl_version..."
-        
-        # Download kubectl binary for macOS
-        if curl -LO "https://dl.k8s.io/release/$kubectl_version/bin/darwin/amd64/kubectl" &> /dev/null; then
-            echo "✅ kubectl downloaded successfully"
-            
-            # Make it executable
-            chmod +x kubectl
-            
-            # Move to a directory in PATH (try /usr/local/bin first, then ~/bin)
-            if sudo mv kubectl /usr/local/bin/ 2>/dev/null; then
-                echo "✅ kubectl installed to /usr/local/bin/"
-            elif mkdir -p ~/bin && mv kubectl ~/bin/ && export PATH="$HOME/bin:$PATH"; then
-                echo "✅ kubectl installed to ~/bin/"
-                echo "ℹ️  Added ~/bin to PATH for this session"
-                echo "   Add 'export PATH=\"\$HOME/bin:\$PATH\"' to your shell profile for permanent access"
-            else
-                echo "❌ Failed to install kubectl to system PATH"
-                echo "   You may need to run with sudo or install manually"
-                return 1
-            fi
-            
-            # Verify installation
-            if command -v kubectl &> /dev/null; then
-                echo "✅ kubectl installed successfully"
-                kubectl version --client --short 2>/dev/null || echo "   kubectl client ready"
-                return 0
-            else
-                echo "❌ kubectl installation verification failed"
-                return 1
-            fi
-        else
-            echo "❌ Failed to download kubectl"
-            return 1
-        fi
+        echo "❌ Failed to download kubectl"
+        return 1
     fi
 }
 
@@ -465,7 +575,6 @@ test_url_accessible() {
     return 1
 }
 
-# Function to expose SHO service with a LoadBalancer and verify it's online
 expose_sho_service() {
     local release_name="$1"
     local namespace="$2"
@@ -525,7 +634,6 @@ expose_sho_service() {
             # Wait for DNS record to propagate and service to start responding
             echo ""
             echo "🔍 Checking if SHO console is responding..."
-            echo "⏳ Waiting for DNS record to propagate..."
             sleep 5
             
             # Test URL accessibility before opening browser
@@ -536,6 +644,7 @@ expose_sho_service() {
                     # macOS
                     open "$full_url"
                     echo "✅ Browser opened successfully"
+                    return 0
                 else
                     echo "ℹ️ Could not detect a browser opener. Please open this URL manually:"
                     echo "   $full_url"
@@ -544,14 +653,8 @@ expose_sho_service() {
                 echo "⚠️  SHO console is not yet responding"
                 echo "ℹ️ The LoadBalancer is ready, but the application might still be starting up"
                 echo "📝 Please wait a few minutes and try accessing:"
-                echo "   $full_url"
-                echo ""
-                echo "🔍 You can check the pod status with:"
-                echo "   kubectl get pods -n $namespace -l app.kubernetes.io/instance=$release_name"
-                echo "   kubectl logs -n $namespace -l app.kubernetes.io/instance=$release_name --tail=20"
+                continue
             fi
-            
-            return 0
         fi
         
         echo "   LoadBalancer not ready yet. Attempt $((attempts + 1))/$max_attempts - waiting 10 seconds..."
@@ -583,7 +686,7 @@ uninstall_sho() {
     echo "    Release: $release_name"
     echo "    Namespace: $NAMESPACE"
     echo ""
-    read "confirm?🚨 Are you sure you want to proceed with uninstallation? (yes/no): "
+    read -r -p "🚨 Are you sure you want to proceed with uninstallation? (yes/no): " confirm
     
     if [[ "$confirm" != "yes" ]]; then
         echo "🛑 Uninstallation cancelled"
@@ -614,11 +717,11 @@ uninstall_sho() {
     else
         echo "ℹ️ No LoadBalancer service found"
     fi
-    
+
     echo "Cleaning up resources..."
     kubectl get selfhostedruntimes -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
-    kubectl get selfhostedvaultoperators -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
-    kubectl delete selfhostedruntime --ignore-not-found self-hosted-runtime || true
+	kubectl get selfhostedvaultoperators -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
+	kubectl delete selfhostedruntime --ignore-not-found self-hosted-runtime || true
 
     # Uninstall the Helm release
     echo ""
@@ -631,18 +734,18 @@ uninstall_sho() {
         echo "Waiting for resources to cleanup..."
         sleep 30
         kubectl get vaultroles.self-hosted-vault-operator.outsystemscloud.com -o name | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
-        for ns in flux-sdlc sh-registry vault istio-system outsystems-gloo-system nats-auth outsystems-gloo-system flux-system outsystems-prometheus outsystems-rbac-manager outsystems-stakater vault-operator seaweedfs authorization-services; do \
+        for ns in flux-sdlc sh-registry vault istio-system outsystems-gloo-system nats-auth nats2crd outsystems-gloo-system flux-system outsystems-prometheus outsystems-rbac-manager outsystems-stakater vault-operator seaweedfs authorization-services; do \
             echo "Patching up namespace: $ns"; \
             kubectl get helmcharts,helmreleases,kustomizations,helmrepositories -n $ns -o name | \
             xargs -I{} kubectl patch {} -n $ns --type merge -p '{"metadata":{"finalizers":null}}'; \
         done
         sleep 10
-        for ns in flux-sdlc nats-auth sh-registry seaweedfs outsystems-otel outsystems-fluentbit outsystems-prometheus nats-auth nats-leaf authorization-services; do \
+        for ns in flux-sdlc nats-auth sh-registry seaweedfs outsystems-otel outsystems-fluentbit outsystems-prometheus nats-auth nats-leaf authorization-services nats2crd; do \
             echo "Cleaning up namespace: $ns"; \
             kubectl get pods -n "$ns" -o name | \
             xargs -I{} kubectl delete {} -n "$ns" --force; \
         done
-        
+
         echo "🗑️ Deleting namespace $NAMESPACE..."
         kubectl delete namespace "$NAMESPACE" --wait=false && kubectl delete namespace "$NAMESPACE_CRED_JOB" --wait=false 
             
@@ -665,7 +768,7 @@ uninstall_sho() {
 }
 
 # Main execution if script is run directly
-if [[ "${(%):-%x}" == "${0}" ]]; then
+if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -687,6 +790,11 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
             --uninstall)
                 UNINSTALL_MODE=true
                 echo "🗑️ Uninstall mode selected"
+                shift
+                ;;
+            --env=*)
+                ENV="${1#*=}"
+                echo "📝 Setting current envrionment: $ENV"
                 shift
                 ;;
             *)
@@ -714,32 +822,32 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
         echo "🗑️ Uninstalling OutSystems Self-Hosted Operator..."
         uninstall_sho "$CHART_NAME" "$NAMESPACE"
     else
-        echo "=== OutSystems Self-Hosted Operator Installation Dependencies Check ==="
-        check_dependencies
-        
-        if [ $? -eq 0 ]; then
-            echo ""
-            echo "🔍 Analyzing Kubernetes cluster..."
-            identify_cluster
-            echo ""
-            echo "🚀 Ready to install SHO!"
-            sho_install
-            expose_sho_service "$CHART_NAME" "$NAMESPACE"
-            echo ""
-            echo "🎉 OutSystems Self-Hosted Operator was successfully installed!"
-            echo ""
-            echo "Your OutSystems Self-Hosted environment is now ready for use."
-            echo "📊 Management Commands:"
-            echo "   helm status $CHART_NAME -n $NAMESPACE"
-            echo "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$release_name"
-            echo ""
-            echo "🗑️  To uninstall:"
-            echo "   $0 --uninstall"
-        else
-            echo ""
-            echo "💥 Please resolve dependency issues before proceeding"
-            echo "💡 Run '$0 --help' for usage information"
-            exit 1
-        fi
+    echo "=== OutSystems Self-Hosted Operator Installation Dependencies Check ==="
+    check_dependencies
+    
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "🔍 Analyzing Kubernetes cluster..."
+        identify_cluster
+        echo ""
+        echo "🚀 Ready to install SHO!"
+        sho_install
+        expose_sho_service "$CHART_NAME" "$NAMESPACE"
+        echo ""
+        echo "🎉 OutSystems Self-Hosted Operator was successfully installed!"
+        echo ""
+        echo "Your OutSystems Self-Hosted environment is now ready for use."
+        echo "📊 Management Commands:"
+        echo "   helm status $CHART_NAME -n $NAMESPACE"
+        echo "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$release_name"
+        echo ""
+        echo "🗑️  To uninstall:"
+        echo "   $0 --uninstall"
+    else
+        echo ""
+        echo "💥 Please resolve dependency issues before proceeding"
+        echo "💡 Run '$0 --help' for usage information"
+        exit 1
+    fi
     fi
 fi

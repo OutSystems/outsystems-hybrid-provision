@@ -1,101 +1,114 @@
-# .github/workflows/release.yml
-name: Release to Production
+  # .github/workflows/release.yml
+  name: Release to Production
 
-on:
-  push:
-    branches: [main]
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout full history
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Get latest version tag
-        id: get_tag
-        run: |
-          echo "Fetching latest tag..."
-          tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1); tag=${tag:-v0.0.0}
-          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
-
-      - name: Determine version bump
-        id: bump
-        run: |
-          latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
-          if git rev-parse "$latest_tag" >/dev/null 2>&1; then
-            range="$latest_tag..HEAD"
-          else
-            echo "No valid tag found, analyzing all commits"
-            range="HEAD"
-          fi
-
-          bump="patch"
-          git log "$range" --pretty=format:"%s" | while read -r msg; do
-            if echo "$msg" | grep -iq "semver major"; then bump="major"; break; fi
-            if echo "$msg" | grep -iq "semver minor"; then bump="minor"; fi
-          done
-          echo "bump=$bump" >> $GITHUB_OUTPUT
-
-      - name: Calculate next version
-        id: next_version
-        run: |
-          set -e
-          current="${{ steps.get_tag.outputs.latest_tag }}"
-          current="${current:-v0.0.0}" # Fallback to v0.0.0 if no previous tags found
-          
-          # Remove 'v' prefix and split version
-          version_number="${current#v}"
-          IFS='.' read -r major minor patch <<< "$version_number"
-          
-          echo "Current version: $major.$minor.$patch"
-          
-          bump="${{ steps.bump.outputs.bump }}"
-          echo "Bump type: $bump"
-
-          # Calculate new version using arithmetic expansion
-          case "$bump" in
-            major) 
-              major=$((major + 1))
-              minor=0
-              patch=0
-              ;;
-            minor) 
-              minor=$((minor + 1))
-              patch=0
-              ;;
-            patch) 
-              patch=$((patch + 1))
-              ;;
-            *) 
-              echo "Unknown bump type: '$bump'"
-              exit 1
-              ;;
-          esac
-
-          new_version="v$major.$minor.$patch"
-          echo "Next version: $new_version"
-          echo "new_version=$new_version" >> $GITHUB_OUTPUT
-
-      - name: Create Git tag and push
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git tag ${{ steps.next_version.outputs.new_version }}
-          git push origin ${{ steps.next_version.outputs.new_version }}
-
-      - name: Upload release to GitHub
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.next_version.outputs.new_version }}
-          name: Release ${{ steps.next_version.outputs.new_version }}
-          files: |
-            linux/install.sh
-            macos/install.sh
-            windows/install.ps1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  on:
+    push:
+      branches: [main]
+  
+  jobs:
+    release:
+      runs-on: ubuntu-latest
+      permissions:
+        contents: write
+        pull-requests: read
+  
+      steps:
+        - name: Checkout full history
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
+            fetch-tags: true
+        - name: Configure Git
+          run: |
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+  
+        - name: Get latest version tag
+          id: get_tag
+          run: |
+            echo "Fetching latest tag..."
+            tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1); tag=${tag:-v0.0.0}
+            echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+  
+        - name: Determine version bump
+          id: bump
+          run: |
+            latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+            if git rev-parse "$latest_tag" >/dev/null 2>&1; then
+              range="$latest_tag..HEAD"
+            else
+              echo "No valid tag found, analyzing all commits"
+              range="HEAD"
+            fi
+  
+            bump="patch"
+            git log "$range" --pretty=format:"%s" | while read -r msg; do
+              if echo "$msg" | grep -iq "semver major"; then bump="major"; break; fi
+              if echo "$msg" | grep -iq "semver minor"; then bump="minor"; fi
+            done
+            bump=${bump:-patch}
+            echo "bump=$bump" >> $GITHUB_OUTPUT
+  
+        - name: Calculate next version
+          id: next_version
+          run: |
+            set -e
+            current="${{ steps.get_tag.outputs.latest_tag }}"
+            current="${current:-v0.0.0}" # Fallback to v0.0.0 if no previous tags found
+            
+            # Remove 'v' prefix and split version
+            version_number="${current#v}"
+            IFS='.' read -r major minor patch <<< "$version_number"
+            
+            echo "Current version: $major.$minor.$patch"
+            
+            bump="${{ steps.bump.outputs.bump }}"
+            echo "Bump type: $bump"
+  
+            # Calculate new version using arithmetic expansion
+            case "$bump" in
+              major) 
+                major=$((major + 1))
+                minor=0
+                patch=0
+                ;;
+              minor) 
+                minor=$((minor + 1))
+                patch=0
+                ;;
+              patch) 
+                patch=$((patch + 1))
+                ;;
+              *) 
+                echo "Unknown bump type: '$bump'"
+                exit 1
+                ;;
+            esac
+  
+            new_version="v$major.$minor.$patch"
+            echo "Next version: $new_version"
+            echo "new_version=$new_version" >> $GITHUB_OUTPUT
+        - name: Prepare release assets
+          run: |
+            mkdir -p release-assets
+            for os in $(ls scripts); do
+              for file in scripts/$os/*; do
+                filename="${file##*/}"  # Extract filename with extension
+                filename="${filename%.*}"  # Remove the extension
+                ext="${file##*.}"
+                release_file="${os}-${filename}.${ext}"
+                echo "Preparing release file: $release_file"
+                cp "$file" "release-assets/${release_file}"
+              done
+            done
+  
+        
+        - name: Upload release to GitHub
+          uses: softprops/action-gh-release@v2
+          with:
+            tag_name: ${{ steps.next_version.outputs.new_version }}
+            name: Release ${{ steps.next_version.outputs.new_version }}
+            files: release-assets/*
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
