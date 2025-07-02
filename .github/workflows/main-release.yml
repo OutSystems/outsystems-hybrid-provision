@@ -110,7 +110,13 @@
             name: Release ${{ steps.next_version.outputs.new_version }}
             files: release-assets/*
           env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}            
+        - name: Delete previous 'latest' release
+          run: |
+              gh release delete latest -y || echo "No previous 'latest' release"
+              git push origin :refs/tags/latest || echo "No previous 'latest' tag"
+          env:
+              GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         - name: Create static 'latest' GitHub release (overwrite)
           uses: softprops/action-gh-release@v2
           with:
