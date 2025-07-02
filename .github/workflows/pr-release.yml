@@ -1,4 +1,3 @@
-# .github/workflows/pr-preview.yml
 name: PR (Non-Prod)
 
 on:
@@ -6,7 +5,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
   pages: write
 
 jobs:
@@ -14,21 +13,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Prepare preview folder
+      - name: Prepare preview content in /tmp (read-only)
         run: |
-          mkdir -p out/non-prod/linux
-          mkdir -p out/non-prod/macos
-          mkdir -p out/non-prod/windows
-          cp linux/install.sh out/non-prod/linux/install.sh
-          cp macos/install.sh out/non-prod/macos/install.sh
-          cp windows/install.ps1 out/non-prod/windows/install.ps1
+          STAGING_DIR="/tmp/preview"
+          mkdir -p "$STAGING_DIR"
+          INDEX_FILE="$STAGING_DIR/index.html"
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: out
+          echo '<!DOCTYPE html>
+          <html><head><meta charset="utf-8"><title>Non-Prod Scripts</title></head><body><ul>' > "$INDEX_FILE"
 
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+          for os in $(ls installer); do
+            for file in installer/$os/*; do
+              filename="${file##*/}"
+              ext="${file##*.}"
+              base="${filename%.*}"
+              release_file="${os}-${base}.${ext}"
+              # Copy to staging and replace PUB_IMAGE_REPO line safely
+              cp "$file" "$STAGING_DIR/$release_file"
+
+              echo "<li><a href=\"./$release_file\">$os - $release_file</a></li>" >> "$INDEX_FILE"
+            done
+          done
+
+          echo '</ul></body></html>' >> "$INDEX_FILE"
+
+      - name: Switch to preview branch and push content
+        run: |
+          STAGING_DIR="/tmp/preview"
+
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+          git fetch origin non-prod-preview || true
+          git switch non-prod-preview || git checkout -b non-prod-preview
+
+          # Clean repo and copy from staging
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -r "$STAGING_DIR"/* .
+
+          git add .
+          git commit -m "Update non-prod preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
+          git push origin HEAD:non-prod-preview
