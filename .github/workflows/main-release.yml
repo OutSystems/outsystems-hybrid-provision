@@ -111,4 +111,14 @@
             files: release-assets/*
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        - name: Create static 'latest' GitHub release (overwrite)
+          uses: softprops/action-gh-release@v2
+          with:
+              tag_name: latest
+              name: Latest Release
+              files: release-assets/*
+              draft: false
+              prerelease: false
+          env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
