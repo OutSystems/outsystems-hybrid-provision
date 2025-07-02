@@ -7,6 +7,7 @@ param(
     [switch]$Uninstall,
     [switch]$Help,
     [switch]$LocalInstall
+    [switch]$Env
 )
 
 # Set error action preference to stop on errors
@@ -61,13 +62,16 @@ $CHART_NAME = "self-hosted-operator"
 
 # Default repository URL
 if (-not $Repository) {
-    $HELM_REPO_URL = if ($env:HELM_REPO_URL) { $env:HELM_REPO_URL } else { "oci://quay.io/rgi-sergio/helm" }
+    $HELM_REPO_URL = if ($env:HELM_REPO_URL) { $env:HELM_REPO_URL } else { "oci://public.ecr.aws/g4u4y4x2/lab/helm" }
     $CHART_REPO = "$HELM_REPO_URL/$CHART_NAME"
 } else {
     $CHART_REPO = "$Repository/$CHART_NAME"
 }
 
-$IMAGE_REGISTRY = if ($env:IMAGE_REGISTRY) { $env:IMAGE_REGISTRY } else { "quay.io/rgi-sergio" }
+# Check if env arguments is passed from command line
+if 
+
+$IMAGE_REGISTRY = if ($env:IMAGE_REGISTRY) { $env:IMAGE_REGISTRY } else { "public.ecr.aws/g4u4y4x2/lab" }
 $IMAGE_REPOSITORY = "self-hosted-operator"
 
 $SH_REGISTRY = ""

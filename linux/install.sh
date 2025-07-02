@@ -7,12 +7,21 @@ NAMESPACE="self-hosted-operator"
 NAMESPACE_CRED_JOB="self-hosted-registry-credentials-job"
 
 CHART_NAME="self-hosted-operator"
-HELM_REPO_URL=${HELM_REPO_URL:-"oci://quay.io/rgi-sergio/helm"}
+HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
-IMAGE_REGISTRY=${IMAGE_REGISTRY:-"quay.io/rgi-sergio"}
+IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
 IMAGE_REPOSITORY="self-hosted-operator"
 
 SH_REGISTRY=${SH_REGISTRY:-""}
+
+# Setup environment configs
+if [[ $ENV == "production" ]]; then
+    echo "🔧 Setting environment to production"
+    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/j0s5s8b0/ga/helm"}
+    CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
+    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/j0s5s8b0/ga"}
+
+fi
 
 # Function to check if Helm is installed
 check_helm_installed() {
@@ -781,6 +790,11 @@ if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
             --uninstall)
                 UNINSTALL_MODE=true
                 echo "🗑️ Uninstall mode selected"
+                shift
+                ;;
+            --env=*)
+                ENV="${1#*=}"
+                echo "📝 Setting current envrionment: $ENV"
                 shift
                 ;;
             *)
