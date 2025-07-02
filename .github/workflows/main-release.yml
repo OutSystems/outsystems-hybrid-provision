@@ -91,8 +91,8 @@
         - name: Prepare release assets
           run: |
             mkdir -p release-assets
-            for os in $(ls installer); do
-              for file in installer/$os/*; do
+            for os in $(ls scripts); do
+              for file in scripts/$os/*; do
                 filename="${file##*/}"  # Extract filename with extension
                 filename="${filename%.*}"  # Remove the extension
                 ext="${file##*.}"
