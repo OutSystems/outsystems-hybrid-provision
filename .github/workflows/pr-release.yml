@@ -18,7 +18,7 @@ jobs:
 
       - name: Prepare preview content in /tmp (read-only)
         run: |
-          STAGING_DIR="/tmp/preview"
+          STAGING_DIR="/tmp/preview/non-prod"
           mkdir -p "$STAGING_DIR"
           INDEX_FILE="$STAGING_DIR/index.html"
 
@@ -40,6 +40,15 @@ jobs:
 
           echo '</ul></body></html>' >> "$INDEX_FILE"
 
+          # root-level index.html with a link to non-prod
+          echo '<!DOCTYPE html>
+          <html><head><meta charset="utf-8"><title>Script Index</title></head><body>
+          <h1>Available Environments</h1>
+          <ul>
+            <li><a href="./non-prod/index.html">Non-Prod</a></li>
+          </ul>
+          </body></html>' > /tmp/preview/index.html
+
       - name: Switch to preview branch and push content
         run: |
           STAGING_DIR="/tmp/preview"
@@ -57,3 +66,4 @@ jobs:
           git add .
           git commit -m "Update non-prod preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
           git push origin HEAD:non-prod-preview
+          
