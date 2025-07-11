@@ -28,8 +28,6 @@ Before you can use ODC Studio, download it from the ODC Portal and login to your
 
         Core services deployed in the customer's environment (on-prem or private cloud)
 
-        Selected components (e.g., analytics, licensing, system updates) securely managed by the vendor
-
     Customer-Owned Data
 
         All application and user data is stored and processed within the customer's controlled environment
