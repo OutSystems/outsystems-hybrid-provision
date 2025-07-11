@@ -7,6 +7,7 @@ NAMESPACE="self-hosted-operator"
 NAMESPACE_CRED_JOB="self-hosted-registry-credentials-job"
 
 CHART_NAME="self-hosted-operator"
+# TODO: Update with ga ecr repo when available
 HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2/lab"}
@@ -15,11 +16,12 @@ IMAGE_REPOSITORY="self-hosted-operator"
 SH_REGISTRY=${SH_REGISTRY:-""}
 
 # Setup environment configs
-if [[ $ENV == "production" ]]; then
+if [[ $ENV == "non-prod" ]]; then
     echo "🔧 Setting environment to production"
-    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/j0s5s8b0/ga/helm"}
+    # TODO: Update with ga ecr repo when available
+    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/ga/helm"}
     CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
-    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/j0s5s8b0/ga"}
+    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
 
 fi
 
