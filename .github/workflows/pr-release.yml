@@ -64,6 +64,11 @@ jobs:
           cp -r "$STAGING_DIR"/* .
 
           git add .
-          git commit -m "Update non-prod preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
-          git push origin HEAD:non-prod-preview
+          CHANGES=$(git status --porcelain)
+          if [ -n "$CHANGES" ]; then
+            git commit -m "Update non-prod preview for PR #${{ github.event.pull_request.number }}"
+            git push origin HEAD:non-prod-preview
+          else
+            echo "✅ No changes to commit or push."
+          fi
           
