@@ -13,13 +13,13 @@ CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2/lab"}
 IMAGE_REPOSITORY="self-hosted-operator"
 
-SH_REGISTRY=${SH_REGISTRY:-""}
+#SH_REGISTRY=${SH_REGISTRY:-""}
 
 # Setup environment configs
 if [[ $ENV == "non-prod" ]]; then
     echo "🔧 Setting environment to production"
     # TODO: Update with ga ecr repo when available
-    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/ga/helm"}
+    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
     CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
     IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
 
@@ -121,12 +121,12 @@ check_dependencies() {
     fi
     
     # verify OutSystems helm repository
-    if verify_repo_access; then
-        echo "✅ OutSystems repository is ready"
-    else
-        echo "❌ SHO repository verification failed"
-        all_deps_ok=false
-    fi
+    # if verify_repo_access; then
+    #     echo "✅ OutSystems repository is ready"
+    # else
+    #     echo "❌ SHO repository verification failed"
+    #     all_deps_ok=false
+    # fi
     
     if [ "$all_deps_ok" = true ]; then
         echo "🎉 All required dependencies are satisfied!"
@@ -138,12 +138,16 @@ check_dependencies() {
 }
 
 # Function to verify repository access and list available charts
-verify_repo_access() {    
+verify_repo_access() {
     echo "🔍 Verifying repository access"
 
-    helm_output=$(helm show chart $CHART_REPO 2>&1)
+    # Authenticate with public ECR (needed even for public Helm charts)
+    aws ecr-public get-login-password --region us-east-1 | \
+        helm registry login --username AWS --password-stdin public.ecr.aws
+
+    helm_output=$(helm show chart "$CHART_REPO" 2>&1)
     helm_exit_code=$?
-    if [ $helm_exit_code -eq 0 ] ; then
+    if [ $helm_exit_code -eq 0 ]; then
         echo "✅ SHO Registry is accessible"
         return 0
     else
@@ -152,6 +156,7 @@ verify_repo_access() {
         return 1
     fi
 }
+
 
 # Function to identify Kubernetes cluster type and set appropriate options
 identify_cluster() {
@@ -188,6 +193,8 @@ show_usage() {
     echo "  --version=VERSION        The SHO chart version to install (optional, defaults to latest)"
     echo "  --repository=REPO_URL    The SHO registry URL (optional, uses default if not specified)"
     echo "  --uninstall              Uninstall OutSystems Self-Hosted Operator"
+    echo "  --env                    Set the environment (non-prod, prod, etc.)"
+    echo "  --get-console-url        Get the console URL for the installed SHO"
     echo "  --help, -h               Show this help message"
     echo ""
     echo "Examples:"
@@ -195,6 +202,7 @@ show_usage() {
     echo "  $0 --version=1.2.3"
     echo "  $0 --repository=registry.example.com"
     echo "  $0 --version=1.2.3 --repository=registry.example.com"
+    echo "  $0 --env=non-prod --get-console-url"
 }
 
 # Function to install OutSystems Self-Hosted Operator
@@ -226,7 +234,9 @@ sho_install() {
         --set image.registry="${IMAGE_REGISTRY}" \
         --set image.repository="${IMAGE_REPOSITORY}" \
         --set image.tag="${IMAGE_VERSION}" \
-        --set registry.url="$SH_REGISTRY" \
+        --set registry.url="${SH_REGISTRY}" \
+        --set registry.username="${SP_ID}" \
+		--set registry.password="${SP_SECRET}" \
         --set-string podAnnotations.timestamp="$TIMESTAMP" \
         --set platform="${CLUSTER_TYPE}" \
         --set scc.create="${SCC_CREATION}")
@@ -705,6 +715,11 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
                 echo "📝 Setting current envrionment: $ENV"
                 shift
                 ;;
+            --get-console-url)
+                GET_CONSOLE_URL=true
+                echo "🔍 Get console url operation selected."
+                shift
+                ;;
             *)
                 echo "❌ Error: Unknown option $1"
                 echo ""
@@ -713,6 +728,50 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
                 ;;
         esac
     done
+    
+    # Check if SHO console url is needed
+    if [ "$GET_CONSOLE_URL" = true ]; then
+        # Check SHO is installed
+        if ! helm status "$CHART_NAME" -n "$NAMESPACE" &>/dev/null; then
+            echo "❌ Error: OutSystems Self-Hosted Operator is not installed"
+            echo "   Please install it first using: $0"
+            exit 1
+        fi
+        # Get the LoadBalancer service URL
+        echo "🌐 Retrieving LoadBalancer service URL for $CHART_NAME..."
+        if kubectl get svc "$CHART_NAME-public" -n "$NAMESPACE" >/dev/null 2>&1; then
+            route_url=$(kubectl get svc "$CHART_NAME-public" -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+            if [ -z "$route_url" ]; then
+                route_url=$(kubectl get svc "$CHART_NAME-public" -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+            fi
+            
+            if [ -n "$route_url" ]; then
+                echo "✅ LoadBalancer URL: http://$route_url:5050"
+                local full_url="http://${route_url}:5050"
+            
+                if test_url_accessible "$full_url" 10; then
+                   echo "🎉 SHO console is responding! Opening browser..."
+                
+                   if command -v open &>/dev/null; then
+                        # macOS
+                        open "$full_url"
+                        echo "✅ Browser opened successfully"
+                    else
+                        echo "ℹ️ Could not detect a browser opener. Please open this URL manually:"
+                        echo "   $full_url"
+                    fi
+                fi
+                exit 0
+            else
+                echo "❌ Error: LoadBalancer service URL not found. Please contact support!!!"
+                exit 1    
+            fi
+        else
+            echo "❌ Error: LoadBalancer service $CHART_NAME-public not found in namespace $NAMESPACE. Creating it now..."
+            expose_sho_service "$CHART_NAME" "$NAMESPACE"
+            exit 0
+        fi
+    fi
     
     # Set default version if not provided
     if [ -z "$HELM_CHART_VERSION" ]; then
@@ -725,6 +784,7 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
     echo "Repository URL: ${CHART_REPO}"
     echo "Version: ${HELM_CHART_VERSION}"
     echo ""
+    
     
     if [ "$UNINSTALL_MODE" = true ]; then
         echo "🗑️ Uninstalling OutSystems Self-Hosted Operator..."
