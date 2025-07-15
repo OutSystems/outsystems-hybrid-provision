@@ -164,11 +164,11 @@ identify_cluster() {
     
     # Determine cluster type based on node labels
     if kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'openshift'; then
-        CLUSTER_TYPE="openshift"
+        CLUSTER_TYPE="ocp"
     elif kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'azure'; then
-        CLUSTER_TYPE="aks"
+        CLUSTER_TYPE="azure"
     elif kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'eks.amazonaws.com'; then
-        CLUSTER_TYPE="eks"
+        CLUSTER_TYPE="aws"
     else
         CLUSTER_TYPE="unknown"
     fi
