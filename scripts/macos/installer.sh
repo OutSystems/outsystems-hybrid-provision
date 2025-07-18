@@ -12,8 +12,9 @@ HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2/lab"}
 IMAGE_REPOSITORY="self-hosted-operator"
+REPO="g4u4y4x2/lab/helm/self-hosted-operator"
 
-#SH_REGISTRY=${SH_REGISTRY:-""}
+SH_REGISTRY=${SH_REGISTRY:-""}
 
 # Setup environment configs
 if [[ $ENV == "non-prod" ]]; then
@@ -120,14 +121,6 @@ check_dependencies() {
         all_deps_ok=false
     fi
     
-    # verify OutSystems helm repository
-    # if verify_repo_access; then
-    #     echo "✅ OutSystems repository is ready"
-    # else
-    #     echo "❌ SHO repository verification failed"
-    #     all_deps_ok=false
-    # fi
-    
     if [ "$all_deps_ok" = true ]; then
         echo "🎉 All required dependencies are satisfied!"
         return 0
@@ -136,27 +129,6 @@ check_dependencies() {
         return 1
     fi
 }
-
-# Function to verify repository access and list available charts
-verify_repo_access() {
-    echo "🔍 Verifying repository access"
-
-    # Authenticate with public ECR (needed even for public Helm charts)
-    aws ecr-public get-login-password --region us-east-1 | \
-        helm registry login --username AWS --password-stdin public.ecr.aws
-
-    helm_output=$(helm show chart "$CHART_REPO" 2>&1)
-    helm_exit_code=$?
-    if [ $helm_exit_code -eq 0 ]; then
-        echo "✅ SHO Registry is accessible"
-        return 0
-    else
-        echo "❌ Cannot access OutSystems repository or no charts found"
-        echo "Error: $helm_output"
-        return 1
-    fi
-}
-
 
 # Function to identify Kubernetes cluster type and set appropriate options
 identify_cluster() {
@@ -183,6 +155,26 @@ identify_cluster() {
     else
         SCC_CREATION="false"
     fi
+}
+
+# Get latest self-hosted operator version
+get_latest_sho_version() {
+    echo "🔍 Fetching latest OutSystems Self-Hosted Operator version..."
+    
+    token=$(curl -sL "https://public.ecr.aws/token?scope=repository:${REPO}:pull" | jq -r .token)
+    tags=$(curl -s -H "Authorization: Bearer $token" \
+    "https://public.ecr.aws/v2/${REPO}/tags/list" | \
+    jq -r '.tags[]')
+    latest_version=$(echo "$tags" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+    
+    if [ -z "$latest_version" ]; then
+        echo "❌ Failed to fetch the latest version from $REPO"
+        return 1
+    fi
+    
+    echo "✅ Latest version found: $latest_version"
+    export HELM_CHART_VERSION="$latest_version"
+    return 0
 }
 
 # Function to show usage
@@ -773,10 +765,16 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
         fi
     fi
     
+    if [ "$UNINSTALL_MODE" = true ]; then
+        echo "🗑️ Uninstalling OutSystems Self-Hosted Operator..."
+        uninstall_sho "$CHART_NAME" "$NAMESPACE"
+        exit 0
+    fi
+
     # Set default version if not provided
     if [ -z "$HELM_CHART_VERSION" ]; then
-        echo "📝 Version not provided, using latest"
-        export HELM_CHART_VERSION="latest"
+        echo "📝 Version not provided, checking latest version available"
+        get_latest_sho_version
     fi
     
     # Show current configuration
@@ -785,37 +783,28 @@ if [[ "${(%):-%x}" == "${0}" ]]; then
     echo "Version: ${HELM_CHART_VERSION}"
     echo ""
     
-    
-    if [ "$UNINSTALL_MODE" = true ]; then
-        echo "🗑️ Uninstalling OutSystems Self-Hosted Operator..."
-        uninstall_sho "$CHART_NAME" "$NAMESPACE"
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "🔍 Analyzing Kubernetes cluster..."
+        identify_cluster
+        echo ""
+        echo "🚀 Ready to install SHO!"
+        sho_install
+        expose_sho_service "$CHART_NAME" "$NAMESPACE"
+        echo ""
+        echo "🎉 OutSystems Self-Hosted Operator was successfully installed!"
+        echo ""
+        echo "Your OutSystems Self-Hosted environment is now ready for use."
+        echo "📊 Management Commands:"
+        echo "   helm status $CHART_NAME -n $NAMESPACE"
+        echo "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$release_name"
+        echo ""
+        echo "🗑️  To uninstall:"
+        echo "   $0 --uninstall"
     else
-        echo "=== OutSystems Self-Hosted Operator Installation Dependencies Check ==="
-        check_dependencies
-        
-        if [ $? -eq 0 ]; then
-            echo ""
-            echo "🔍 Analyzing Kubernetes cluster..."
-            identify_cluster
-            echo ""
-            echo "🚀 Ready to install SHO!"
-            sho_install
-            expose_sho_service "$CHART_NAME" "$NAMESPACE"
-            echo ""
-            echo "🎉 OutSystems Self-Hosted Operator was successfully installed!"
-            echo ""
-            echo "Your OutSystems Self-Hosted environment is now ready for use."
-            echo "📊 Management Commands:"
-            echo "   helm status $CHART_NAME -n $NAMESPACE"
-            echo "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$release_name"
-            echo ""
-            echo "🗑️  To uninstall:"
-            echo "   $0 --uninstall"
-        else
-            echo ""
-            echo "💥 Please resolve dependency issues before proceeding"
-            echo "💡 Run '$0 --help' for usage information"
-            exit 1
-        fi
+        echo ""
+        echo "💥 Please resolve dependency issues before proceeding"
+        echo "💡 Run '$0 --help' for usage information"
+        exit 1
     fi
 fi
