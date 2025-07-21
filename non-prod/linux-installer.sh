@@ -545,8 +545,8 @@ show_troubleshooting_commands() {
 test_url_accessible() {
     local url="$1"
     local timeout=10
-    local max_tries=10  # Default to 6 tries (1 minute with 10s intervals)
-    local retry_interval=10    # Wait 5 seconds between retries
+    local max_tries=10  # Default to 10 tries
+    local retry_interval=20    # Wait 20 seconds between retries
     local try=1
     
     echo "🔍 Testing URL accessibility: $url"
@@ -793,7 +793,7 @@ if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
                 ;;
             --env=*)
                 ENV="${1#*=}"
-                echo "📝 Setting current envrionment: $ENV"
+                echo "📝 Setting current environment: $ENV"
                 shift
                 ;;
             --get-console-url)
