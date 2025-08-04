@@ -1,579 +1,728 @@
-# PowerShell script for installing OutSystems Self-Hosted Operator on Windows
-# Requires PowerShell 5.1 or later
+#!/usr/bin/env powershell
 
 param(
     [string]$Version,
     [string]$Repository,
+    [string]$Env,
     [switch]$Uninstall,
-    [switch]$Help,
-    [switch]$LocalInstall
-    [switch]$Env
+    [switch]$GetConsoleUrl,
+    [switch]$Help
 )
 
-# Set error action preference to stop on errors
+# Exit on errors
 $ErrorActionPreference = "Stop"
-
-# Check if running as administrator
-function Test-IsAdmin {
-    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-# Function to restart as administrator if needed
-function Start-AsAdmin {
-    if (-not (Test-IsAdmin)) {
-        Write-Host "[WARN] This script requires administrator privileges to install tools system-wide." -ForegroundColor Yellow
-        Write-Host "[INFO] Attempting to restart as administrator..." -ForegroundColor Cyan
-        
-        $scriptPath = $MyInvocation.ScriptName
-        $arguments = @()
-        
-        # Build arguments array from bound parameters
-        foreach ($param in $MyInvocation.BoundParameters.GetEnumerator()) {
-            if ($param.Value -is [switch] -and $param.Value) {
-                $arguments += "-$($param.Key)"
-            } elseif ($param.Value -isnot [switch]) {
-                $arguments += "-$($param.Key)"
-                $arguments += "`"$($param.Value)`""
-            }
-        }
-        
-        $argumentString = $arguments -join " "
-        
-        # Create command that keeps window open
-        $command = "& `"$scriptPath`" $argumentString; Write-Host ''; Write-Host '[INFO] Script execution completed. Press any key to close this window...' -ForegroundColor Green; `$null = `$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')"
-        
-        try {
-            Start-Process powershell -Verb RunAs -ArgumentList "-NoExit", "-Command", $command
-            exit 0
-        } catch {
-            Write-Host "[ERROR] Failed to restart as administrator. Please run PowerShell as administrator manually." -ForegroundColor Red
-            Write-Host "[INFO] Right-click PowerShell and select 'Run as administrator', then run this script again." -ForegroundColor Yellow
-            exit 1
-        }
-    }
-}
 
 # Configuration
 $NAMESPACE = "self-hosted-operator"
 $NAMESPACE_CRED_JOB = "self-hosted-registry-credentials-job"
-$CHART_NAME = "self-hosted-operator"
 
-# Default repository URL
-if (-not $Repository) {
+$CHART_NAME = "self-hosted-operator"
+# TODO: Update with ga ecr repo when available
+$HELM_REPO_URL = if ($env:HELM_REPO_URL) { $env:HELM_REPO_URL } else { "oci://public.ecr.aws/g4u4y4x2/lab/helm" }
+$CHART_REPO = "$HELM_REPO_URL/$CHART_NAME"
+$IMAGE_REGISTRY = if ($env:IMAGE_REGISTRY) { $env:IMAGE_REGISTRY } else { "public.ecr.aws/g4u4y4x2" }
+$IMAGE_REPOSITORY = "self-hosted-operator"
+$REPO = "g4u4y4x2/lab/helm/self-hosted-operator"
+
+$SH_REGISTRY = if ($env:SH_REGISTRY) { $env:SH_REGISTRY } else { "" }
+
+# Setup environment configs
+if ($Env -eq "non-prod") {
+    Write-Host "🔧 Setting environment to non production" -ForegroundColor Yellow
+    # TODO: Update with ga ecr repo when available
     $HELM_REPO_URL = if ($env:HELM_REPO_URL) { $env:HELM_REPO_URL } else { "oci://public.ecr.aws/g4u4y4x2/lab/helm" }
     $CHART_REPO = "$HELM_REPO_URL/$CHART_NAME"
-} else {
-    $CHART_REPO = "$Repository/$CHART_NAME"
-}
-
-# Check if env arguments is passed from command line
-if 
-
-$IMAGE_REGISTRY = if ($env:IMAGE_REGISTRY) { $env:IMAGE_REGISTRY } else { "public.ecr.aws/g4u4y4x2/lab" }
-$IMAGE_REPOSITORY = "self-hosted-operator"
-
-$SH_REGISTRY = ""
-
-# Set version
-$HELM_CHART_VERSION = if ($Version) { $Version } else { "latest" }
-
-# Function to check if a command exists
-function Test-CommandExists {
-    param([string]$Command)
-    try {
-        Get-Command $Command -ErrorAction Stop | Out-Null
-        return $true
-    } catch {
-        return $false
-    }
+    $IMAGE_REGISTRY = if ($env:IMAGE_REGISTRY) { $env:IMAGE_REGISTRY } else { "public.ecr.aws/g4u4y4x2" }
 }
 
 # Function to check if Helm is installed
 function Test-HelmInstalled {
-    Write-Host "[INFO] Checking Helm installation..." -ForegroundColor Cyan
-    
-    if (Test-CommandExists "helm") {
-        Write-Host "[OK] Helm is already installed" -ForegroundColor Green
-        try {
-            $helmVersion = helm version --short 2>$null
-            Write-Host "   Version: $helmVersion" -ForegroundColor Gray
-            return $true
-        } catch {
-            Write-Host "   Helm command available" -ForegroundColor Gray
+    try {
+        $version = helm version --short 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Helm is already installed" -ForegroundColor Green
+            Write-Host $version
             return $true
         }
-    } else {
-        Write-Host "[ERROR] Helm is not installed" -ForegroundColor Red
+    }
+    catch {
+        Write-Host "❌ Helm is not installed" -ForegroundColor Red
         return $false
     }
+    return $false
 }
 
 # Function to install Helm on Windows
 function Install-Helm {
-    Write-Host "[INFO] Installing Helm..." -ForegroundColor Cyan
-    
-    # Check if LocalInstall is specified or if we don't have admin privileges
-    if ($LocalInstall -or -not (Test-IsAdmin)) {
-        Write-Host "[INFO] Installing Helm locally..." -ForegroundColor Yellow
-        return Install-HelmLocal
-    }
+    Write-Host "🚀 Installing Helm..." -ForegroundColor Blue
     
     # Check if Chocolatey is available
-    if (Test-CommandExists "choco") {
-        Write-Host "[INFO] Installing Helm via Chocolatey..." -ForegroundColor Yellow
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        Write-Host "📦 Installing Helm via Chocolatey..." -ForegroundColor Blue
         try {
             choco install kubernetes-helm -y
-            Write-Host "[OK] Helm installed successfully via Chocolatey" -ForegroundColor Green
-            helm version --short
-            return $true
-        } catch {
-            Write-Host "[ERROR] Failed to install Helm via Chocolatey" -ForegroundColor Red
-            Write-Host "[INFO] Attempting local installation..." -ForegroundColor Yellow
-            return Install-HelmLocal
-        }
-    } elseif (Test-CommandExists "winget") {
-        Write-Host "[INFO] Installing Helm via winget..." -ForegroundColor Yellow
-        try {
-            $wingetOutput = winget install Helm.Helm --accept-source-agreements --accept-package-agreements 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] Helm installed successfully via winget" -ForegroundColor Green
-                # Refresh environment variables
-                $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-                # Test if helm is now available
-                if (Test-CommandExists "helm") {
-                    helm version --short
-                    return $true
-                } else {
-                    Write-Host "[WARN] Helm installed but not found in PATH. Trying local installation..." -ForegroundColor Yellow
-                    return Install-HelmLocal
-                }
-            } else {
-                Write-Host "[ERROR] winget install failed with exit code $LASTEXITCODE" -ForegroundColor Red
-                Write-Host "Output: $wingetOutput" -ForegroundColor Gray
-                Write-Host "[INFO] Attempting local installation..." -ForegroundColor Yellow
-                return Install-HelmLocal
+                Write-Host "✅ Helm installed successfully via Chocolatey" -ForegroundColor Green
+                helm version --short
+                return $true
             }
-        } catch {
-            Write-Host "[ERROR] Failed to install Helm via winget: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "[INFO] Attempting local installation..." -ForegroundColor Yellow
-            return Install-HelmLocal
+            else {
+                Write-Host "❌ Failed to install Helm via Chocolatey" -ForegroundColor Red
+                return $false
+            }
         }
-    } else {
-        Write-Host "[INFO] Package managers not found. Installing Helm locally..." -ForegroundColor Yellow
-        return Install-HelmLocal
+        catch {
+            Write-Host "❌ Failed to install Helm via Chocolatey" -ForegroundColor Red
+            return $false
+        }
     }
-}
-
-# Function to install Helm locally
-function Install-HelmLocal {
-    Write-Host "[INFO] Installing Helm locally in current directory..." -ForegroundColor Yellow
-    
-    try {
-        # Create local tools directory
-        $toolsDir = Join-Path (Get-Location) "tools"
-        $helmDir = Join-Path $toolsDir "helm"
-        
-        if (-not (Test-Path $toolsDir)) {
-            New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
-            Write-Host "[INFO] Created tools directory: $toolsDir" -ForegroundColor Gray
+    elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "📦 Installing Helm via winget..." -ForegroundColor Blue
+        try {
+            winget install Helm.Helm
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ Helm installed successfully via winget" -ForegroundColor Green
+                helm version --short
+                return $true
+            }
+            else {
+                Write-Host "❌ Failed to install Helm via winget" -ForegroundColor Red
+                return $false
+            }
         }
-        
-        if (-not (Test-Path $helmDir)) {
-            New-Item -ItemType Directory -Path $helmDir -Force | Out-Null
+        catch {
+            Write-Host "❌ Failed to install Helm via winget" -ForegroundColor Red
+            return $false
         }
+    }
+    else {
+        Write-Host "📦 Package manager not found. Installing Helm via direct download..." -ForegroundColor Blue
         
-        Write-Host "[INFO] Downloading Helm..." -ForegroundColor Yellow
-        
-        # Create temp directory
-        $tempDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_ }
-        
-        # Get latest Helm version
-        $latestVersion = (Invoke-RestMethod "https://api.github.com/repos/helm/helm/releases/latest").tag_name
-        $downloadUrl = "https://get.helm.sh/helm-$latestVersion-windows-amd64.zip"
-        
-        $zipPath = Join-Path $tempDir "helm.zip"
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
-        
-        # Extract
-        Expand-Archive -Path $zipPath -DestinationPath $tempDir
-        $helmExe = Get-ChildItem -Path $tempDir -Recurse -Name "helm.exe" | Select-Object -First 1
-        $extractedHelmPath = Join-Path $tempDir (Split-Path $helmExe -Parent)
-        
-        # Copy to local tools directory
-        Copy-Item (Join-Path $extractedHelmPath "helm.exe") $helmDir -Force
-        
-        # Add to PATH for current session
-        $env:PATH = "$helmDir;$env:PATH"
-        
-        # Clean up
-        Remove-Item $tempDir -Recurse -Force
-        
-        Write-Host "[OK] Helm installed locally at: $helmDir" -ForegroundColor Green
-        Write-Host "[INFO] Helm version:" -ForegroundColor Gray
-        & "$helmDir\helm.exe" version --short
-        
-        # Create a helper script for future sessions
-        $helperScript = @"
-# Add Helm to PATH for this session
-`$helmPath = Join-Path (Get-Location) "tools\helm"
-if (Test-Path `$helmPath) {
-    `$env:PATH = "`$helmPath;`$env:PATH"
-    Write-Host "[INFO] Added Helm to PATH: `$helmPath" -ForegroundColor Green
-}
-"@
-        $helperPath = Join-Path $toolsDir "setup-path.ps1"
-        $helperScript | Out-File -FilePath $helperPath -Encoding UTF8
-        
-        Write-Host "[INFO] Helper script created: $helperPath" -ForegroundColor Blue
-        Write-Host "[INFO] Run '. .\tools\setup-path.ps1' in future sessions to add tools to PATH" -ForegroundColor Blue
-        
-        return $true
-    } catch {
-        Write-Host "[ERROR] Failed to install Helm locally: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
+        try {
+            # Get the latest Helm version
+            $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/helm/helm/releases/latest"
+            $version = $latestRelease.tag_name
+            $downloadUrl = "https://get.helm.sh/helm-$version-windows-amd64.zip"
+            
+            Write-Host "📥 Downloading Helm $version..." -ForegroundColor Blue
+            
+            $tempPath = "$env:TEMP\helm.zip"
+            $extractPath = "$env:TEMP\helm"
+            
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tempPath
+            
+            # Extract the zip file
+            Expand-Archive -Path $tempPath -DestinationPath $extractPath -Force
+            
+            # Find the helm.exe file
+            $helmExe = Get-ChildItem -Path $extractPath -Recurse -Name "helm.exe" | Select-Object -First 1
+            $helmExePath = Join-Path $extractPath $helmExe
+            
+            # Create a directory in Program Files if it doesn't exist
+            $installPath = "$env:ProgramFiles\Helm"
+            if (!(Test-Path $installPath)) {
+                New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+            }
+            
+            # Copy helm.exe to the install directory
+            Copy-Item -Path $helmExePath -Destination "$installPath\helm.exe" -Force
+            
+            # Add to PATH if not already there
+            $currentPath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
+            if ($currentPath -notlike "*$installPath*") {
+                [Environment]::SetEnvironmentVariable("PATH", "$currentPath;$installPath", "Machine")
+                $env:PATH = "$env:PATH;$installPath"
+            }
+            
+            # Clean up
+            Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+            
+            # Verify installation
+            if (Test-Path "$installPath\helm.exe") {
+                Write-Host "✅ Helm installed successfully to $installPath" -ForegroundColor Green
+                & "$installPath\helm.exe" version --short
+                return $true
+            }
+            else {
+                Write-Host "❌ Helm installation verification failed" -ForegroundColor Red
+                return $false
+            }
+        }
+        catch {
+            Write-Host "❌ Failed to install Helm via direct download: $($_.Exception.Message)" -ForegroundColor Red
+            return $false
+        }
     }
 }
 
 # Function to ensure Helm is installed
-function Ensure-HelmInstalled {
+function Confirm-HelmInstalled {
+    Write-Host "🔍 Checking Helm installation..." -ForegroundColor Blue
+    
     if (Test-HelmInstalled) {
         return $true
-    } else {
-        Write-Host "[INFO] Helm not found. Proceeding with installation..." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "🔧 Helm not found. Proceeding with installation..." -ForegroundColor Yellow
         return Install-Helm
     }
 }
 
-# Function to check if kubectl is installed
-function Test-KubectlInstalled {
-    Write-Host "[INFO] Checking kubectl installation..." -ForegroundColor Cyan
+# Function to install AWS CLI on Windows
+function Install-AwsCli {
+    Write-Host "🚀 Installing AWS CLI..." -ForegroundColor Blue
     
-    if (Test-CommandExists "kubectl") {
-        Write-Host "[OK] kubectl is already installed" -ForegroundColor Green
+    # Check if Chocolatey is available
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        Write-Host "📦 Installing AWS CLI via Chocolatey..." -ForegroundColor Blue
         try {
-            $kubectlVersion = kubectl version --client --output=yaml 2>$null | Select-String "gitVersion"
-            if ($kubectlVersion) {
-                Write-Host "   $kubectlVersion" -ForegroundColor Gray
-            } else {
-                Write-Host "   kubectl client version available" -ForegroundColor Gray
+            choco install awscli -y
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ AWS CLI installed successfully via Chocolatey" -ForegroundColor Green
+                aws --version
+                return $true
             }
-            return $true
-        } catch {
-            Write-Host "   kubectl client available" -ForegroundColor Gray
+            else {
+                Write-Host "❌ Failed to install AWS CLI via Chocolatey" -ForegroundColor Red
+                return $false
+            }
+        }
+        catch {
+            Write-Host "❌ Failed to install AWS CLI via Chocolatey" -ForegroundColor Red
+            return $false
+        }
+    }
+    elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "📦 Installing AWS CLI via winget..." -ForegroundColor Blue
+        try {
+            winget install Amazon.AWSCLI
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ AWS CLI installed successfully via winget" -ForegroundColor Green
+                aws --version
+                return $true
+            }
+            else {
+                Write-Host "❌ Failed to install AWS CLI via winget" -ForegroundColor Red
+                return $false
+            }
+        }
+        catch {
+            Write-Host "❌ Failed to install AWS CLI via winget" -ForegroundColor Red
+            return $false
+        }
+    }
+    else {
+        Write-Host "📦 Package manager not found. Installing AWS CLI via MSI installer..." -ForegroundColor Blue
+        
+        try {
+            $downloadUrl = "https://awscli.amazonaws.com/AWSCLIV2.msi"
+            $tempPath = "$env:TEMP\AWSCLIV2.msi"
+            
+            Write-Host "📥 Downloading AWS CLI installer..." -ForegroundColor Blue
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tempPath
+            
+            Write-Host "📦 Installing AWS CLI..." -ForegroundColor Blue
+            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", $tempPath, "/quiet" -Wait
+            
+            # Clean up
+            Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
+            
+            # Refresh PATH
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+            
+            # Verify installation
+            if (Get-Command aws -ErrorAction SilentlyContinue) {
+                Write-Host "✅ AWS CLI installed successfully" -ForegroundColor Green
+                aws --version
+                return $true
+            }
+            else {
+                Write-Host "❌ AWS CLI installation verification failed" -ForegroundColor Red
+                Write-Host "💡 You may need to restart your PowerShell session or reboot" -ForegroundColor Yellow
+                return $false
+            }
+        }
+        catch {
+            Write-Host "❌ Failed to install AWS CLI via MSI installer: $($_.Exception.Message)" -ForegroundColor Red
+            return $false
+        }
+    }
+}
+
+# Function to ensure AWS CLI is installed
+function Confirm-AwsCliInstalled {
+    Write-Host "🔍 Checking AWS CLI installation..." -ForegroundColor Blue
+    
+    if (Get-Command aws -ErrorAction SilentlyContinue) {
+        Write-Host "✅ AWS CLI is already installed" -ForegroundColor Green
+        aws --version
+        return $true
+    }
+    else {
+        Write-Host "🔧 AWS CLI not found. Proceeding with installation..." -ForegroundColor Yellow
+        return Install-AwsCli
+    }
+}
+
+# Function to check all dependencies required for helm chart installation
+function Test-Dependencies {
+    $allDepsOk = $true
+    
+    # Check AWS CLI (required for ECR authentication)
+    Write-Host "📋 Checking AWS CLI..." -ForegroundColor Blue
+    if (!(Confirm-AwsCliInstalled)) {
+        Write-Host "❌ Failed to ensure AWS CLI is available" -ForegroundColor Red
+        $allDepsOk = $false
+    }
+    
+    # Check jq (PowerShell has built-in JSON support, but we'll check for jq for compatibility)
+    Write-Host "📋 Checking JSON parsing capabilities..." -ForegroundColor Blue
+    if (!(Get-Command jq -ErrorAction SilentlyContinue)) {
+        Write-Host "⚠️  jq is not installed, but PowerShell has built-in JSON parsing" -ForegroundColor Yellow
+        Write-Host "✅ JSON parsing capabilities available" -ForegroundColor Green
+    }
+    else {
+        Write-Host "✅ jq is already installed" -ForegroundColor Green
+    }
+    
+    # Check Helm
+    Write-Host "📋 Checking Helm..." -ForegroundColor Blue
+    if (!(Confirm-HelmInstalled)) {
+        Write-Host "❌ Failed to ensure Helm is available" -ForegroundColor Red
+        $allDepsOk = $false
+    }
+    
+    # Check kubectl
+    Write-Host "📋 Checking kubectl..." -ForegroundColor Blue
+    if (!(Confirm-KubectlInstalled)) {
+        Write-Host "❌ Failed to ensure kubectl is available" -ForegroundColor Red
+        $allDepsOk = $false
+    }
+    
+    # Check Kubernetes cluster connectivity using Helm
+    Write-Host "📋 Checking Kubernetes cluster connectivity via Helm..." -ForegroundColor Blue
+    try {
+        helm list --all-namespaces 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Helm can connect to Kubernetes cluster" -ForegroundColor Green
+        }
+        else {
+            Write-Host "❌ Helm cannot connect to Kubernetes cluster" -ForegroundColor Red
+            Write-Host "   Make sure you have:" -ForegroundColor Yellow
+            Write-Host "   - A valid kubeconfig file" -ForegroundColor Yellow
+            Write-Host "   - Access to a Kubernetes cluster" -ForegroundColor Yellow
+            Write-Host "   - Proper cluster permissions" -ForegroundColor Yellow
+            $allDepsOk = $false
+        }
+    }
+    catch {
+        Write-Host "❌ Helm cannot connect to Kubernetes cluster" -ForegroundColor Red
+        $allDepsOk = $false
+    }
+    
+    if ($allDepsOk) {
+        Write-Host "🎉 All required dependencies are satisfied!" -ForegroundColor Green
+        return $true
+    }
+    else {
+        Write-Host "💥 Some dependencies are missing or failed to install" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Function to identify Kubernetes cluster type and set appropriate options
+function Get-ClusterType {
+    Write-Host "🔍 Identifying cluster type..." -ForegroundColor Blue
+    
+    try {
+        # Determine cluster type based on node labels
+        $nodeLabels = kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' 2>$null
+        
+        if ($nodeLabels -match 'openshift') {
+            $script:CLUSTER_TYPE = "ocp"
+        }
+        elseif ($nodeLabels -match 'azure') {
+            $script:CLUSTER_TYPE = "azure"
+        }
+        elseif ($nodeLabels -match 'eks.amazonaws.com') {
+            $script:CLUSTER_TYPE = "aws"
+        }
+        else {
+            $script:CLUSTER_TYPE = "unknown"
+        }
+
+        Write-Host "✅ Cluster type identified: $script:CLUSTER_TYPE" -ForegroundColor Green
+
+        # Set Helm flags based on cluster type
+        if ($script:CLUSTER_TYPE -eq "openshift") {
+            Write-Host "🔧 Setting OpenShift specific options" -ForegroundColor Yellow
+            Write-Host "   - Using SCC (Security Context Constraints)" -ForegroundColor Yellow
+            $script:SCC_CREATION = "true"
+        }
+        else {
+            $script:SCC_CREATION = "false"
+        }
+    }
+    catch {
+        Write-Host "⚠️  Could not identify cluster type: $($_.Exception.Message)" -ForegroundColor Yellow
+        $script:CLUSTER_TYPE = "unknown"
+        $script:SCC_CREATION = "false"
+    }
+}
+
+# Get latest self-hosted operator version
+function Get-LatestShoVersion {
+    Write-Host "🔍 Fetching latest OutSystems Self-Hosted Operator version..." -ForegroundColor Blue
+    
+    try {
+        # Use the same token method as the ECR authentication
+        $tokenResponse = Invoke-RestMethod -Uri "https://public.ecr.aws/token?scope=repository:${REPO}:pull" -Method Get
+        
+        if (!$tokenResponse -or !$tokenResponse.token) {
+            Write-Host "❌ Failed to get token from ECR public API" -ForegroundColor Red
+            return $false
+        }
+        
+        $token = $tokenResponse.token
+        
+        # Get tags using the token
+        $headers = @{
+            "Authorization" = "Bearer $token"
+        }
+        
+        $tagsResponse = Invoke-RestMethod -Uri "https://public.ecr.aws/v2/${REPO}/tags/list" -Headers $headers -Method Get
+        
+        if (!$tagsResponse -or !$tagsResponse.tags) {
+            Write-Host "❌ Failed to fetch tags from ECR repository" -ForegroundColor Red
+            return $false
+        }
+        
+        $tags = $tagsResponse.tags
+        
+        if ($tags.Count -eq 0) {
+            Write-Host "❌ No tags found in ECR repository response" -ForegroundColor Red
+            return $false
+        }
+        
+        # Filter for semantic version tags and sort
+        $versionTags = $tags | Where-Object { $_ -match '^[0-9]+\.[0-9]+\.[0-9]+$' } | Sort-Object { [Version]$_ }
+        
+        if ($versionTags.Count -eq 0) {
+            Write-Host "❌ Failed to find a valid version from tags" -ForegroundColor Red
+            Write-Host "Available tags: $($tags -join ', ')" -ForegroundColor Yellow
+            return $false
+        }
+        
+        $latestVersion = $versionTags[-1]
+        
+        Write-Host "✅ Latest version found: $latestVersion" -ForegroundColor Green
+        $script:HELM_CHART_VERSION = $latestVersion
+        return $true
+    }
+    catch {
+        Write-Host "❌ Failed to fetch latest version: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Function to authenticate with ECR public registry using AWS CLI
+function Connect-EcrHelmLogin {
+    Write-Host "🔐 Setting up ECR public registry access for Helm..." -ForegroundColor Blue
+    
+    # Check if AWS CLI is available
+    if (!(Get-Command aws -ErrorAction SilentlyContinue)) {
+        Write-Host "❌ AWS CLI is not installed or not available in PATH" -ForegroundColor Red
+        Write-Host "💡 Please ensure AWS CLI is installed by running the dependency check" -ForegroundColor Yellow
+        return $false
+    }
+    
+    Write-Host "🔑 Using AWS CLI for ECR public authentication..." -ForegroundColor Blue
+    
+    try {
+        # Test if AWS CLI can get the login password
+        $awsPassword = aws ecr-public get-login-password --region us-east-1 2>$null
+        
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($awsPassword)) {
+            Write-Host "❌ AWS CLI failed to get authentication token" -ForegroundColor Red
+            Write-Host "💡 This could be due to:" -ForegroundColor Yellow
+            Write-Host "   - AWS CLI not configured (run 'aws configure')" -ForegroundColor Yellow
+            Write-Host "   - No AWS credentials available" -ForegroundColor Yellow
+            Write-Host "   - Network connectivity issues" -ForegroundColor Yellow
+            Write-Host "   - Insufficient permissions" -ForegroundColor Yellow
+            Write-Host "" 
+            Write-Host "🔧 To configure AWS CLI:" -ForegroundColor Blue
+            Write-Host "   aws configure" -ForegroundColor Cyan
+            Write-Host "   # You can use any valid AWS credentials" -ForegroundColor Gray
+            Write-Host "   # Access Key ID: (your access key)" -ForegroundColor Gray
+            Write-Host "   # Secret Access Key: (your secret key)" -ForegroundColor Gray
+            Write-Host "   # Default region: us-east-1" -ForegroundColor Gray
+            Write-Host "   # Default output format: json" -ForegroundColor Gray
+            return $false
+        }
+        
+        Write-Host "✅ AWS CLI authentication token obtained" -ForegroundColor Green
+        
+        # Use the AWS CLI generated password with Helm
+        $awsPassword | helm registry login --username AWS --password-stdin public.ecr.aws 2>$null
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Helm registry authentication successful" -ForegroundColor Green
             return $true
         }
-    } else {
-        Write-Host "[ERROR] kubectl is not installed" -ForegroundColor Red
+        else {
+            Write-Host "❌ Helm registry login failed" -ForegroundColor Red
+            Write-Host "💡 This could be due to:" -ForegroundColor Yellow
+            Write-Host "   - Network connectivity issues" -ForegroundColor Yellow
+            Write-Host "   - Helm version compatibility" -ForegroundColor Yellow
+            Write-Host "   - Registry authentication problems" -ForegroundColor Yellow
+            return $false
+        }
+    }
+    catch {
+        Write-Host "❌ ECR authentication failed: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
 }
 
 # Function to install kubectl on Windows
 function Install-Kubectl {
-    Write-Host "[INFO] Installing kubectl..." -ForegroundColor Cyan
-    
-    # Check if LocalInstall is specified or if we don't have admin privileges
-    if ($LocalInstall -or -not (Test-IsAdmin)) {
-        Write-Host "[INFO] Installing kubectl locally..." -ForegroundColor Yellow
-        return Install-KubectlLocal
-    }
+    Write-Host "🚀 Installing kubectl..." -ForegroundColor Blue
     
     # Check if Chocolatey is available
-    if (Test-CommandExists "choco") {
-        Write-Host "[INFO] Installing kubectl via Chocolatey..." -ForegroundColor Yellow
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        Write-Host "📦 Installing kubectl via Chocolatey..." -ForegroundColor Blue
         try {
             choco install kubernetes-cli -y
-            Write-Host "[OK] kubectl installed successfully via Chocolatey" -ForegroundColor Green
-            try {
-                kubectl version --client --output=yaml 2>$null | Select-String "gitVersion" | Select-Object -First 1
-            } catch {
-                Write-Host "   kubectl client installed successfully" -ForegroundColor Gray
-            }
-            return $true
-        } catch {
-            Write-Host "[ERROR] Failed to install kubectl via Chocolatey" -ForegroundColor Red
-            Write-Host "[INFO] Attempting local installation..." -ForegroundColor Yellow
-            return Install-KubectlLocal
-        }
-    } elseif (Test-CommandExists "winget") {
-        Write-Host "[INFO] Installing kubectl via winget..." -ForegroundColor Yellow
-        try {
-            $wingetOutput = winget install Kubernetes.kubectl --accept-source-agreements --accept-package-agreements 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] kubectl installed successfully via winget" -ForegroundColor Green
-                # Refresh environment variables
-                $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-                # Test if kubectl is now available
-                if (Test-CommandExists "kubectl") {
-                    try {
-                        kubectl version --client --output=yaml 2>$null | Select-String "gitVersion" | Select-Object -First 1
-                    } catch {
-                        Write-Host "   kubectl client installed successfully" -ForegroundColor Gray
-                    }
-                    return $true
-                } else {
-                    Write-Host "[WARN] kubectl installed but not found in PATH. Trying local installation..." -ForegroundColor Yellow
-                    return Install-KubectlLocal
-                }
-            } else {
-                Write-Host "[ERROR] winget install failed with exit code $LASTEXITCODE" -ForegroundColor Red
-                Write-Host "Output: $wingetOutput" -ForegroundColor Gray
-                Write-Host "[INFO] Attempting local installation..." -ForegroundColor Yellow
-                return Install-KubectlLocal
+                Write-Host "✅ kubectl installed successfully via Chocolatey" -ForegroundColor Green
+                kubectl version --client --output=yaml 2>$null | Select-String "gitVersion" | Select-Object -First 1
+                return $true
             }
-        } catch {
-            Write-Host "[ERROR] Failed to install kubectl via winget: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "[INFO] Attempting local installation..." -ForegroundColor Yellow
-            return Install-KubectlLocal
+            else {
+                Write-Host "❌ Failed to install kubectl via Chocolatey" -ForegroundColor Red
+                return $false
+            }
         }
-    } else {
-        Write-Host "[INFO] Package managers not found. Installing kubectl locally..." -ForegroundColor Yellow
-        return Install-KubectlLocal
+        catch {
+            Write-Host "❌ Failed to install kubectl via Chocolatey" -ForegroundColor Red
+            return $false
+        }
     }
-}
-
-# Function to install kubectl locally
-function Install-KubectlLocal {
-    Write-Host "[INFO] Installing kubectl locally in current directory..." -ForegroundColor Yellow
-    
-    try {
-        # Create local tools directory
-        $toolsDir = Join-Path (Get-Location) "tools"
-        $kubectlDir = Join-Path $toolsDir "kubectl"
-        
-        if (-not (Test-Path $toolsDir)) {
-            New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
-            Write-Host "[INFO] Created tools directory: $toolsDir" -ForegroundColor Gray
-        }
-        
-        if (-not (Test-Path $kubectlDir)) {
-            New-Item -ItemType Directory -Path $kubectlDir -Force | Out-Null
-        }
-        
-        Write-Host "[INFO] Downloading kubectl..." -ForegroundColor Yellow
-        
-        # Get latest stable version
-        $latestVersion = (Invoke-WebRequest -Uri "https://dl.k8s.io/release/stable.txt" -UseBasicParsing).Content.Trim()
-        $downloadUrl = "https://dl.k8s.io/release/$latestVersion/bin/windows/amd64/kubectl.exe"
-        
-        $kubectlPath = Join-Path $kubectlDir "kubectl.exe"
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $kubectlPath
-        
-        # Add to PATH for current session
-        $env:PATH = "$kubectlDir;$env:PATH"
-        
-        Write-Host "[OK] kubectl installed locally at: $kubectlDir" -ForegroundColor Green
-        Write-Host "[INFO] kubectl version:" -ForegroundColor Gray
+    elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "📦 Installing kubectl via winget..." -ForegroundColor Blue
         try {
-            & "$kubectlPath" version --client --output=yaml 2>$null | Select-String "gitVersion" | Select-Object -First 1
-        } catch {
-            Write-Host "   kubectl client installed successfully" -ForegroundColor Gray
+            winget install Kubernetes.kubectl
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ kubectl installed successfully via winget" -ForegroundColor Green
+                kubectl version --client --output=yaml 2>$null | Select-String "gitVersion" | Select-Object -First 1
+                return $true
+            }
+            else {
+                Write-Host "❌ Failed to install kubectl via winget" -ForegroundColor Red
+                return $false
+            }
         }
+        catch {
+            Write-Host "❌ Failed to install kubectl via winget" -ForegroundColor Red
+            return $false
+        }
+    }
+    else {
+        Write-Host "📦 Package manager not found. Installing kubectl via direct download..." -ForegroundColor Blue
         
-        # Update the helper script to include kubectl
-        $helperScript = @"
-# Add tools to PATH for this session
-`$toolsPath = Join-Path (Get-Location) "tools"
-`$helmPath = Join-Path `$toolsPath "helm"
-`$kubectlPath = Join-Path `$toolsPath "kubectl"
-
-if (Test-Path `$helmPath) {
-    `$env:PATH = "`$helmPath;`$env:PATH"
-    Write-Host "[INFO] Added Helm to PATH: `$helmPath" -ForegroundColor Green
-}
-
-if (Test-Path `$kubectlPath) {
-    `$env:PATH = "`$kubectlPath;`$env:PATH"
-    Write-Host "[INFO] Added kubectl to PATH: `$kubectlPath" -ForegroundColor Green
-}
-"@
-        $helperPath = Join-Path $toolsDir "setup-path.ps1"
-        $helperScript | Out-File -FilePath $helperPath -Encoding UTF8
-        
-        Write-Host "[INFO] Helper script updated: $helperPath" -ForegroundColor Blue
-        
-        return $true
-    } catch {
-        Write-Host "[ERROR] Failed to install kubectl locally: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
+        try {
+            # Get the latest stable version
+            $kubectlVersion = Invoke-RestMethod -Uri "https://dl.k8s.io/release/stable.txt"
+            
+            if ([string]::IsNullOrEmpty($kubectlVersion)) {
+                Write-Host "❌ Failed to get kubectl version" -ForegroundColor Red
+                return $false
+            }
+            
+            Write-Host "📥 Downloading kubectl $kubectlVersion..." -ForegroundColor Blue
+            
+            # Download kubectl binary for Windows
+            $downloadUrl = "https://dl.k8s.io/release/$kubectlVersion/bin/windows/amd64/kubectl.exe"
+            $installPath = "$env:ProgramFiles\kubectl"
+            $kubectlExe = "$installPath\kubectl.exe"
+            
+            # Create directory if it doesn't exist
+            if (!(Test-Path $installPath)) {
+                New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+            }
+            
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $kubectlExe
+            
+            Write-Host "✅ kubectl downloaded successfully" -ForegroundColor Green
+            
+            # Add to PATH if not already there
+            $currentPath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
+            if ($currentPath -notlike "*$installPath*") {
+                [Environment]::SetEnvironmentVariable("PATH", "$currentPath;$installPath", "Machine")
+                $env:PATH = "$env:PATH;$installPath"
+                Write-Host "✅ kubectl installed to $installPath" -ForegroundColor Green
+                Write-Host "ℹ️  Added $installPath to PATH" -ForegroundColor Blue
+            }
+            else {
+                Write-Host "✅ kubectl installed to $installPath" -ForegroundColor Green
+            }
+            
+            # Verify installation
+            if (Test-Path $kubectlExe) {
+                Write-Host "✅ kubectl installed successfully" -ForegroundColor Green
+                & $kubectlExe version --client --output=yaml 2>$null | Select-String "gitVersion" | Select-Object -First 1
+                return $true
+            }
+            else {
+                Write-Host "❌ kubectl installation verification failed" -ForegroundColor Red
+                return $false
+            }
+        }
+        catch {
+            Write-Host "❌ Failed to install kubectl: $($_.Exception.Message)" -ForegroundColor Red
+            return $false
+        }
     }
 }
 
 # Function to ensure kubectl is installed
-function Ensure-KubectlInstalled {
-    if (Test-KubectlInstalled) {
+function Confirm-KubectlInstalled {
+    Write-Host "🔍 Checking kubectl installation..." -ForegroundColor Blue
+    
+    if (Get-Command kubectl -ErrorAction SilentlyContinue) {
+        Write-Host "✅ kubectl is already installed" -ForegroundColor Green
+        kubectl version --client --output=yaml 2>$null | Select-String "gitVersion" | Select-Object -First 1
         return $true
-    } else {
-        Write-Host "[INFO] kubectl not found. Proceeding with installation..." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "🔧 kubectl not found. Proceeding with installation..." -ForegroundColor Yellow
         return Install-Kubectl
-    }
-}
-
-# Function to verify repository access
-function Test-RepoAccess {
-    Write-Host "[INFO] Verifying repository access" -ForegroundColor Cyan
-    
-    try {
-        # Capture both stdout and stderr
-        $helmOutput = helm show chart $CHART_REPO
-        
-        # Convert output to string for analysis
-        $outputString = $helmOutput -join "`n"
-
-        # For OCI registries, success can be indicated by:
-        # 1. Exit code 0
-        # 2. "Pulled:" message in output (indicates successful chart pull from OCI registry)
-        # 3. Presence of chart metadata (apiVersion, name, version, etc.)
-        $isOciSuccess = $outputString -match "Pulled:\s+.*$CHART_NAME" -or 
-                       $outputString -match "apiVersion:\s*v\d+" -or
-                       $outputString -match "name:\s*$CHART_NAME"
-        
-        if ($LASTEXITCODE -eq 0 -or $isOciSuccess) {
-            if ($outputString -match "Pulled:") {
-                Write-Host "[OK] Successfully pulled chart from OCI registry" -ForegroundColor Green
-            } else {
-                Write-Host "[OK] SHO Registry is accessible" -ForegroundColor Green
-            }
-            return $true
-        } else {
-            Write-Host "[ERROR] Cannot access OutSystems repository or no charts found" -ForegroundColor Red
-            
-            # Only show output if it's not too verbose and might be helpful
-            if ($outputString.Length -lt 500 -and $outputString -notmatch "^$") {
-                Write-Host "Error details: $outputString" -ForegroundColor Red
-            }
-            return $false
-        }
-    } catch {
-        Write-Host "[ERROR] Cannot access OutSystems repository or no charts found" -ForegroundColor Red
-        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
-    }
-}
-
-# Function to check all dependencies
-function Test-Dependencies {
-    $allDepsOk = $true
-    
-    # Check Helm
-    Write-Host "[INFO] Checking Helm..." -ForegroundColor Cyan
-    if (-not (Ensure-HelmInstalled)) {
-        Write-Host "[ERROR] Failed to ensure Helm is available" -ForegroundColor Red
-        $allDepsOk = $false
-    }
-    
-    # Check kubectl
-    Write-Host "[INFO] Checking kubectl..." -ForegroundColor Cyan
-    if (-not (Ensure-KubectlInstalled)) {
-        Write-Host "[ERROR] Failed to ensure kubectl is available" -ForegroundColor Red
-        $allDepsOk = $false
-    }
-    
-    # Check Kubernetes cluster connectivity using Helm
-    Write-Host "[INFO] Checking Kubernetes cluster connectivity via Helm..." -ForegroundColor Cyan
-    try {
-        helm list --all-namespaces 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] Helm can connect to Kubernetes cluster" -ForegroundColor Green
-        } else {
-            throw "Helm cannot connect to cluster"
-        }
-    } catch {
-        Write-Host "[ERROR] Helm cannot connect to Kubernetes cluster" -ForegroundColor Red
-        Write-Host "   Make sure you have:" -ForegroundColor Yellow
-        Write-Host "   - A valid kubeconfig file" -ForegroundColor Yellow
-        Write-Host "   - Access to a Kubernetes cluster" -ForegroundColor Yellow
-        Write-Host "   - Proper cluster permissions" -ForegroundColor Yellow
-        $allDepsOk = $false
-    }
-    
-    # Verify OutSystems helm repository
-    if (Test-RepoAccess) {
-        Write-Host "[OK] OutSystems repository is ready" -ForegroundColor Green
-    } else {
-        Write-Host "[ERROR] SHO repository verification failed" -ForegroundColor Red
-        $allDepsOk = $false
-    }
-    
-    if ($allDepsOk) {
-        Write-Host "[SUCCESS] All required dependencies are satisfied!" -ForegroundColor Green
-        return $true
-    } else {
-        Write-Host "[ERROR] Some dependencies are missing or failed to install" -ForegroundColor Red
-        return $false
-    }
-}
-
-# Function to identify Kubernetes cluster type and set appropriate options
-function Invoke-ClusterIdentification {
-    Write-Host "[INFO] Identifying cluster type..." -ForegroundColor Cyan
-    
-    # Determine cluster type based on node labels
-    try {
-        $nodeLabels = kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' 2>$null
-        
-        if ($nodeLabels -match 'openshift') {
-            $script:CLUSTER_TYPE = "openshift"
-        } elseif ($nodeLabels -match 'azure') {
-            $script:CLUSTER_TYPE = "aks"
-        } elseif ($nodeLabels -match 'eks\.amazonaws\.com') {
-            $script:CLUSTER_TYPE = "eks"
-        } else {
-            $script:CLUSTER_TYPE = "unknown"
-        }
-        
-        Write-Host "[OK] Cluster type identified: $script:CLUSTER_TYPE" -ForegroundColor Green
-        
-        # Set Helm flags based on cluster type
-        if ($script:CLUSTER_TYPE -eq "openshift") {
-            $script:HELM_SET_FLAGS = "--set scc.create=true"
-        } else {
-            $script:HELM_SET_FLAGS = "--set scc.create=false"
-        }
-        
-        Write-Host "[INFO] Helm set flags: $script:HELM_SET_FLAGS" -ForegroundColor Gray
-        return $true
-    } catch {
-        Write-Host "[WARN] Failed to identify cluster type: $($_.Exception.Message)" -ForegroundColor Yellow
-        $script:CLUSTER_TYPE = "unknown"
-        $script:HELM_SET_FLAGS = "--set scc.create=false"
-        Write-Host "[INFO] Using default Helm flags: $script:HELM_SET_FLAGS" -ForegroundColor Gray
-        return $false
     }
 }
 
 # Function to show usage
 function Show-Usage {
-    Write-Host "Usage: .\install.ps1 [OPTIONS]" -ForegroundColor White
+    Write-Host "Usage: .\installer.ps1 [OPTIONS]" -ForegroundColor White
     Write-Host ""
-    Write-Host "Options:" -ForegroundColor Yellow
-    Write-Host "  -Version VERSION         The SHO chart version to install (optional, defaults to latest)" -ForegroundColor Gray
-    Write-Host "  -Repository REPO_URL     The SHO registry URL (optional, uses default if not specified)" -ForegroundColor Gray
-    Write-Host "  -LocalInstall            Install tools locally in current directory (no admin privileges required)" -ForegroundColor Gray
-    Write-Host "  -Uninstall               Uninstall OutSystems Self-Hosted Operator" -ForegroundColor Gray
-    Write-Host "  -Help                    Show this help message" -ForegroundColor Gray
+    Write-Host "Options:" -ForegroundColor White
+    Write-Host "  -Version VERSION         The SHO chart version to install (optional, defaults to latest)" -ForegroundColor Cyan
+    Write-Host "  -Repository REPO_URL     The SHO registry URL (optional, uses default if not specified)" -ForegroundColor Cyan
+    Write-Host "  -Uninstall              Uninstall OutSystems Self-Hosted Operator" -ForegroundColor Cyan
+    Write-Host "  -Env ENVIRONMENT        Set the environment (non-prod, prod, etc.)" -ForegroundColor Cyan
+    Write-Host "  -GetConsoleUrl          Get the console URL for the installed SHO" -ForegroundColor Cyan
+    Write-Host "  -Help                   Show this help message" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "Examples:" -ForegroundColor Yellow
-    Write-Host "  .\install.ps1" -ForegroundColor Gray
-    Write-Host "  .\install.ps1 -LocalInstall" -ForegroundColor Gray
-    Write-Host "  .\install.ps1 -Version 1.2.3" -ForegroundColor Gray
-    Write-Host "  .\install.ps1 -Repository registry.example.com" -ForegroundColor Gray
-    Write-Host "  .\install.ps1 -Version 1.2.3 -Repository registry.example.com" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "Installation Modes:" -ForegroundColor Yellow
-    Write-Host "  Default:      Tries system-wide installation (requires admin privileges)" -ForegroundColor Gray
-    Write-Host "  -LocalInstall: Installs tools in ./tools/ directory (no admin privileges required)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "Local Installation Notes:" -ForegroundColor Blue
-    Write-Host "  - Tools are installed in ./tools/ directory" -ForegroundColor Gray
-    Write-Host "  - Run '. .\tools\setup-path.ps1' to add tools to PATH in new sessions" -ForegroundColor Gray
-    Write-Host "  - No administrator privileges required" -ForegroundColor Gray
+    Write-Host "Examples:" -ForegroundColor White
+    Write-Host "  .\installer.ps1" -ForegroundColor Gray
+    Write-Host "  .\installer.ps1 -Version 1.2.3" -ForegroundColor Gray
+    Write-Host "  .\installer.ps1 -Repository registry.example.com" -ForegroundColor Gray
+    Write-Host "  .\installer.ps1 -Version 1.2.3 -Repository registry.example.com" -ForegroundColor Gray
+    Write-Host "  .\installer.ps1 -Env non-prod -GetConsoleUrl" -ForegroundColor Gray
 }
 
-# Function to check SHO pods status
-function Test-ShoPodsStatus {
+# Function to install OutSystems Self-Hosted Operator
+function Install-Sho {
+    Write-Host "🚀 Installing OutSystems Self-Hosted Operator..." -ForegroundColor Blue
+    
+    # Authenticate with ECR public registry
+    if (!(Connect-EcrHelmLogin)) {
+        Write-Host "❌ Failed to authenticate with ECR public registry" -ForegroundColor Red
+        return $false
+    }
+    
+    # Prepare the chart URL
+    if ($script:HELM_CHART_VERSION -ne "latest") {
+        $script:CHART_REPO = "$script:CHART_REPO`:$script:HELM_CHART_VERSION"
+        $script:IMAGE_VERSION = "v$script:HELM_CHART_VERSION"
+    }
+
+    Write-Host "📦 Installing SHO chart from: $script:CHART_REPO" -ForegroundColor Blue
+    
+    $releaseName = "self-hosted-operator"
+    
+    # Create namespaces
+    kubectl create namespace $NAMESPACE 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Namespace $NAMESPACE already exists, skipping creation" -ForegroundColor Yellow
+    }
+    
+    kubectl create namespace $NAMESPACE_CRED_JOB 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Namespace $NAMESPACE_CRED_JOB already exists, skipping creation" -ForegroundColor Yellow
+    }
+    
+    Write-Host "🔧 Running Helm install command..." -ForegroundColor Blue
+    Write-Host "🚀 Deploying with platform: $script:CLUSTER_TYPE" -ForegroundColor Blue
+    
+    $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
+    
+    # Build Helm command arguments
+    $helmArgs = @(
+        "upgrade", "--install", $releaseName, $script:CHART_REPO,
+        "--namespace", $NAMESPACE,
+        "--create-namespace",
+        "--set", "image.registry=$IMAGE_REGISTRY",
+        "--set", "image.repository=$IMAGE_REPOSITORY",
+        "--set", "image.tag=$script:IMAGE_VERSION",
+        "--set", "registry.url=$SH_REGISTRY",
+        "--set", "registry.username=$env:SP_ID",
+        "--set", "registry.password=$env:SP_SECRET",
+        "--set-string", "podAnnotations.timestamp=$timestamp",
+        "--set", "platform=$script:CLUSTER_TYPE",
+        "--set", "scc.create=$script:SCC_CREATION"
+    )
+    
+    try {
+        $installOutput = & helm $helmArgs 2>&1
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ OutSystems Self-Hosted Operator installed successfully!" -ForegroundColor Green
+            Write-Host "📋 Release name: $releaseName" -ForegroundColor Blue
+            Write-Host ""
+            Write-Host "🔍 Installation details:" -ForegroundColor Blue
+            Write-Host $installOutput
+            Write-Host ""
+            
+            # Check if pods are running
+            Write-Host "⏳ Waiting for pods to be ready..." -ForegroundColor Yellow
+            if (Test-ShoPodStatus $releaseName $NAMESPACE) {
+                Write-Host "🎉 OutSystems Self-Hosted Operator is running successfully!" -ForegroundColor Green
+            }
+            else {
+                Write-Host "⚠️  Installation completed but pods are not ready yet" -ForegroundColor Yellow
+                Write-Host ""
+                Show-TroubleshootingCommands $releaseName $NAMESPACE
+            }
+            Write-Host ""
+            return $true
+        }
+        else {
+            Write-Host "❌ Failed to install OutSystems Self-Hosted Operator" -ForegroundColor Red
+            Write-Host "🔍 Error details:" -ForegroundColor Blue
+            Write-Host $installOutput
+            
+            # Parse specific error types
+            if ($installOutput -match "already exists") {
+                Write-Host ""
+                Write-Host "💡 Release already exists. Use a different name or uninstall the existing release." -ForegroundColor Yellow
+            }
+            elseif ($installOutput -match "no such host|connection refused") {
+                Write-Host ""
+                Write-Host "💡 Network connectivity issue. Check registry URL and internet connection." -ForegroundColor Yellow
+            }
+            
+            return $false
+        }
+    }
+    catch {
+        Write-Host "❌ Failed to install OutSystems Self-Hosted Operator: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Function to check if SHO pods are running
+function Test-ShoPodStatus {
     param(
         [string]$ReleaseName,
         [string]$Namespace
@@ -583,310 +732,135 @@ function Test-ShoPodsStatus {
     $checkInterval = 10  # 10 seconds
     $elapsedTime = 0
     
-    Write-Host "[INFO] Checking OutSystems Self-Hosted Operator pod status..." -ForegroundColor Cyan
+    Write-Host "🔍 Checking OutSystems Self-Hosted Operator pod status..." -ForegroundColor Blue
     Write-Host "   Namespace: $Namespace" -ForegroundColor Gray
     Write-Host "   Release: $ReleaseName" -ForegroundColor Gray
     Write-Host ""
     
     while ($elapsedTime -lt $maxWaitTime) {
-        # Get pod status
         try {
+            # Get pod status
             $podInfo = kubectl get pods -n $Namespace -l "app.kubernetes.io/instance=$ReleaseName" -o custom-columns="NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready" --no-headers 2>$null
             
-            if (-not $podInfo) {
-                Write-Host "[INFO] No pods found yet... (${elapsedTime}s elapsed)" -ForegroundColor Yellow
-            } else {
-                Write-Host "[INFO] Current pod status:" -ForegroundColor Cyan
-                Write-Host $podInfo -ForegroundColor Gray
+            if ([string]::IsNullOrEmpty($podInfo)) {
+                Write-Host "⏳ No pods found yet... (${elapsedTime}s elapsed)" -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "📋 Current pod status:" -ForegroundColor Blue
+                Write-Host $podInfo
                 Write-Host ""
                 
                 # Check if any pod is running and ready
-                $runningPods = ($podInfo | Select-String "Running.*true").Count
-                $totalPods = ($podInfo -split "`n").Count
+                $podLines = $podInfo -split "`n" | Where-Object { $_.Trim() -ne "" }
+                $runningPods = ($podLines | Where-Object { $_ -match "Running.*true" }).Count
+                $totalPods = $podLines.Count
                 
                 if ($runningPods -gt 0 -and $runningPods -eq $totalPods) {
-                    Write-Host "[OK] All SHO pods are running and ready!" -ForegroundColor Green
+                    Write-Host "✅ All SHO pods are running and ready!" -ForegroundColor Green
                     return $true
-                } elseif ($podInfo -match "Error|CrashLoopBackOff|ImagePullBackOff") {
-                    Write-Host "[ERROR] Pod(s) in error state detected!" -ForegroundColor Red
+                }
+                elseif ($podInfo -match "Error|CrashLoopBackOff|ImagePullBackOff") {
+                    Write-Host "❌ Pod(s) in error state detected!" -ForegroundColor Red
                     Write-Host ""
-                    Write-Host "[INFO] Detailed pod status:" -ForegroundColor Cyan
+                    Write-Host "🔍 Detailed pod status:" -ForegroundColor Blue
                     kubectl describe pods -n $Namespace -l "app.kubernetes.io/instance=$ReleaseName"
                     Write-Host ""
-                    Write-Host "[INFO] Pod events:" -ForegroundColor Cyan
+                    Write-Host "📋 Pod events:" -ForegroundColor Blue
                     kubectl get events -n $Namespace --field-selector involvedObject.kind=Pod --sort-by=.metadata.creationTimestamp
                     return $false
-                } else {
-                    Write-Host "[INFO] Pods still starting... ($runningPods/$totalPods ready) - waiting ${checkInterval}s..." -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "⏳ Pods still starting... ($runningPods/$totalPods ready) - waiting ${checkInterval}s..." -ForegroundColor Yellow
                 }
             }
-        } catch {
-            Write-Host "[INFO] Checking pod status... (${elapsedTime}s elapsed)" -ForegroundColor Yellow
+            
+            Start-Sleep -Seconds $checkInterval
+            $elapsedTime += $checkInterval
+            Write-Host "   Elapsed time: ${elapsedTime}s / ${maxWaitTime}s" -ForegroundColor Gray
+            Write-Host ""
         }
-        
-        Start-Sleep $checkInterval
-        $elapsedTime += $checkInterval
-        Write-Host "   Elapsed time: ${elapsedTime}s / ${maxWaitTime}s" -ForegroundColor Gray
-        Write-Host ""
+        catch {
+            Write-Host "⚠️  Error checking pod status: $($_.Exception.Message)" -ForegroundColor Yellow
+            Start-Sleep -Seconds $checkInterval
+            $elapsedTime += $checkInterval
+        }
     }
     
-    Write-Host "[WARN] Timeout reached while waiting for pods to be ready" -ForegroundColor Yellow
+    Write-Host "⚠️  Timeout reached while waiting for pods to be ready" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "[INFO] Final pod status:" -ForegroundColor Cyan
-    try {
-        kubectl get pods -n $Namespace -l "app.kubernetes.io/instance=$ReleaseName" -o wide 2>$null
-    } catch {
-        Write-Host "No pods found" -ForegroundColor Gray
-    }
+    Write-Host "🔍 Final pod status:" -ForegroundColor Blue
+    kubectl get pods -n $Namespace -l "app.kubernetes.io/instance=$ReleaseName" -o wide 2>$null
     Write-Host ""
-    Write-Host "[INFO] Recent events:" -ForegroundColor Cyan
-    try {
-        kubectl get events -n $Namespace --sort-by=.metadata.creationTimestamp --tail=10 2>$null
-    } catch {
-        Write-Host "No events available" -ForegroundColor Gray
-    }
+    Write-Host "📋 Recent events:" -ForegroundColor Blue
+    kubectl get events -n $Namespace --sort-by=.metadata.creationTimestamp --tail=10 2>$null
     
     return $false
 }
 
-# Function to show troubleshooting commands
+# Function to show useful troubleshooting commands
 function Show-TroubleshootingCommands {
     param(
         [string]$ReleaseName,
         [string]$Namespace
     )
     
-    Write-Host "[INFO] Troubleshooting Commands:" -ForegroundColor Yellow
+    Write-Host "🛠️  Troubleshooting Commands:" -ForegroundColor Blue
     Write-Host ""
-    Write-Host "[INFO] Check pod status:" -ForegroundColor Cyan
-    Write-Host "   kubectl get pods -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Gray
+    Write-Host "📊 Check pod status:" -ForegroundColor White
+    Write-Host "   kubectl get pods -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "[INFO] Describe pods:" -ForegroundColor Cyan
-    Write-Host "   kubectl describe pods -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Gray
+    Write-Host "📋 Describe pods:" -ForegroundColor White
+    Write-Host "   kubectl describe pods -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "[INFO] View pod logs:" -ForegroundColor Cyan
-    Write-Host "   kubectl logs -n $Namespace -l app.kubernetes.io/instance=$ReleaseName --tail=50" -ForegroundColor Gray
+    Write-Host "📝 View pod logs:" -ForegroundColor White
+    Write-Host "   kubectl logs -n $Namespace -l app.kubernetes.io/instance=$ReleaseName --tail=50" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "[INFO] Check events:" -ForegroundColor Cyan
-    Write-Host "   kubectl get events -n $Namespace --sort-by=.metadata.creationTimestamp" -ForegroundColor Gray
+    Write-Host "📋 Check events:" -ForegroundColor White
+    Write-Host "   kubectl get events -n $Namespace --sort-by=.metadata.creationTimestamp" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "[INFO] Check helm status:" -ForegroundColor Cyan
-    Write-Host "   helm status $ReleaseName -n $Namespace" -ForegroundColor Gray
+    Write-Host "⚡ Check helm status:" -ForegroundColor White
+    Write-Host "   helm status $ReleaseName -n $Namespace" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "[INFO] Restart deployment:" -ForegroundColor Cyan
-    Write-Host "   kubectl rollout restart deployment -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Gray
-}
-
-# Function to install SHO
-function Install-Sho {
-    Write-Host "[INFO] Installing OutSystems Self-Hosted Operator..." -ForegroundColor Cyan
-    
-    # Prepare the chart URL
-    $localChartRepo = $CHART_REPO
-    
-    if ($HELM_CHART_VERSION -ne "latest") {
-        $localChartRepo = "${CHART_REPO}:$HELM_CHART_VERSION"
-        $imageVersion = "v$HELM_CHART_VERSION"
-    }
-    
-    Write-Host "[INFO] Installing SHO chart from: $localChartRepo" -ForegroundColor Yellow
-    
-    $releaseName = "self-hosted-operator"
-    
-    # Create namespaces
-    try {
-        kubectl create namespace $NAMESPACE 2>$null
-    } catch {
-        Write-Host "Namespace $NAMESPACE already exists, skipping creation" -ForegroundColor Gray
-    }
-    
-    try {
-        kubectl create namespace $NAMESPACE_CRED_JOB 2>$null
-    } catch {
-        Write-Host "Namespace $NAMESPACE_CRED_JOB already exists, skipping creation" -ForegroundColor Gray
-    }
-    
-    Write-Host "[INFO] Running Helm install command..." -ForegroundColor Yellow
-    Write-Host "Deploying with platform: $CLUSTER_TYPE" -ForegroundColor Yellow
-
-    # Initialize variables to capture output
-    $installOutput = ""
-    $installExitCode = 0
-    
-    # Temporarily set error action to continue to prevent exceptions from helm output
-    $originalErrorAction = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    
-    try {
-        $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
-        
-        # Execute helm command and capture both stdout and stderr
-        $installOutput = helm upgrade --install $releaseName $localChartRepo `
-            --namespace $NAMESPACE `
-            --create-namespace `
-            --set "image.registry=$IMAGE_REGISTRY" `
-            --set "image.repository=$IMAGE_REPOSITORY" `
-            --set "image.tag=$imageVersion" `
-            --set "registry.url=$SH_REGISTRY" `
-            --set platform="$CLUSTER_TYPE"
-            --set-string "podAnnotations.timestamp=$timestamp" 2>&1
-        
-        # Capture the exit code immediately
-        $installExitCode = $LASTEXITCODE
-        
-        # Convert output to string for analysis
-        $outputString = if ($installOutput -is [array]) { $installOutput -join "`n" } else { $installOutput }
-        
-        # Check for success indicators
-        $isSuccess = ($installExitCode -eq 0) -or 
-                     ($outputString -match "STATUS: deployed") -or
-                     ($outputString -match "Pulled:.*$CHART_NAME") -or
-                     ($outputString -match "Release.*has been.*upgraded")
-        
-        if ($isSuccess) {
-            Write-Host "[OK] OutSystems Self-Hosted Operator installed successfully!" -ForegroundColor Green
-            Write-Host "[INFO] Release name: $releaseName" -ForegroundColor Gray
-            Write-Host ""
-            
-            # Show relevant output (filter out verbose OCI messages if needed)
-            if ($outputString -and $outputString.Length -lt 1000) {
-                Write-Host "[INFO] Installation details:" -ForegroundColor Cyan
-                Write-Host $outputString -ForegroundColor Gray
-            } elseif ($outputString -match "STATUS: deployed") {
-                $relevantLines = $outputString -split "`n" | Where-Object { $_ -match "STATUS:|REVISION:|NAMESPACE:|NOTES:" }
-                if ($relevantLines) {
-                    Write-Host "[INFO] Installation summary:" -ForegroundColor Cyan
-                    Write-Host ($relevantLines -join "`n") -ForegroundColor Gray
-                }
-            }
-            Write-Host ""
-            
-            # Check if pods are running
-            Write-Host "[INFO] Waiting for pods to be ready..." -ForegroundColor Yellow
-            if (Test-ShoPodsStatus $releaseName $NAMESPACE) {
-                Write-Host "[SUCCESS] OutSystems Self-Hosted Operator is running successfully!" -ForegroundColor Green
-            } else {
-                Write-Host "[WARN] Installation completed but pods are not ready yet" -ForegroundColor Yellow
-                Write-Host ""
-                Show-TroubleshootingCommands $releaseName $NAMESPACE
-            }
-            Write-Host ""
-            return $true
-        } else {
-            Write-Host "[ERROR] Failed to install OutSystems Self-Hosted Operator" -ForegroundColor Red
-            Write-Host "[INFO] Exit code: $installExitCode" -ForegroundColor Cyan
-            if ($outputString) {
-                Write-Host "[INFO] Error details:" -ForegroundColor Cyan
-                Write-Host $outputString -ForegroundColor Red
-            }
-            
-            # Parse specific error types
-            if ($outputString -match "already exists") {
-                Write-Host ""
-                Write-Host "[INFO] Release already exists. Use a different name or uninstall the existing release." -ForegroundColor Blue
-            } elseif ($outputString -match "no such host|connection refused") {
-                Write-Host ""
-                Write-Host "[INFO] Network connectivity issue. Check registry URL and internet connection." -ForegroundColor Blue
-            } elseif ($outputString -match "not found|404") {
-                Write-Host ""
-                Write-Host "[INFO] Chart not found. Check the repository URL and chart name." -ForegroundColor Blue
-            }
-            
-            return $false
-        }
-    } catch {
-        Write-Host "[ERROR] Exception occurred during installation" -ForegroundColor Red
-        Write-Host "[INFO] Exception details:" -ForegroundColor Cyan
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        if ($installOutput) {
-            Write-Host "[INFO] Command output:" -ForegroundColor Cyan
-            Write-Host $installOutput -ForegroundColor Red
-        }
-        return $false
-    } finally {
-        # Restore original error action preference
-        $ErrorActionPreference = $originalErrorAction
-    }
+    Write-Host "🔄 Restart deployment:" -ForegroundColor White
+    Write-Host "   kubectl rollout restart deployment -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Cyan
 }
 
 # Function to test if URL is accessible
 function Test-UrlAccessible {
-    param([string]$Url)
+    param(
+        [string]$Url,
+        [int]$MaxTries = 10,
+        [int]$RetryInterval = 20
+    )
     
-    try {
-        Write-Host "[INFO] Testing URL accessibility: $Url" -ForegroundColor Cyan
+    Write-Host "🔍 Testing URL accessibility: $Url" -ForegroundColor Blue
+    Write-Host "   Will try up to $MaxTries times with ${RetryInterval}s intervals" -ForegroundColor Gray
+    
+    for ($try = 1; $try -le $MaxTries; $try++) {
+        Write-Host "   Attempt $try/$MaxTries..." -ForegroundColor Gray
         
-        # Try using Invoke-WebRequest with HEAD request
         try {
-            $response = Invoke-WebRequest -Uri $Url -Method Head -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
+            $response = Invoke-WebRequest -Uri $Url -Method Head -TimeoutSec 10 -ErrorAction Stop
             if ($response.StatusCode -eq 200) {
-                Write-Host "[OK] URL is accessible (HTTP $($response.StatusCode))" -ForegroundColor Green
+                Write-Host "✅ URL is accessible after $try attempt(s)" -ForegroundColor Green
                 return $true
-            } else {
-                Write-Host "[WARN] URL returned HTTP $($response.StatusCode)" -ForegroundColor Yellow
-                return $false
-            }
-        } catch {
-            # If HEAD request fails, try a simple GET request
-            Write-Host "[INFO] HEAD request failed, trying GET request..." -ForegroundColor Gray
-            try {
-                $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
-                if ($response.StatusCode -eq 200) {
-                    Write-Host "[OK] URL is accessible (HTTP $($response.StatusCode))" -ForegroundColor Green
-                    return $true
-                } else {
-                    Write-Host "[WARN] URL returned HTTP $($response.StatusCode)" -ForegroundColor Yellow
-                    return $false
-                }
-            } catch {
-                Write-Host "[WARN] HTTP request failed: $($_.Exception.Message)" -ForegroundColor Yellow
-                
-                # Final fallback: try a simple TCP connection test
-                Write-Host "[INFO] Testing TCP connection..." -ForegroundColor Gray
-                
-                # Extract hostname and port from URL
-                if ($Url -match "https?://([^:/]+)(:(\d+))?") {
-                    $hostname = $matches[1]
-                    $port = if ($matches[3]) { $matches[3] } else { if ($Url.StartsWith("https")) { 443 } else { 80 } }
-                    
-                    try {
-                        $tcpClient = New-Object System.Net.Sockets.TcpClient
-                        $connect = $tcpClient.BeginConnect($hostname, $port, $null, $null)
-                        $wait = $connect.AsyncWaitHandle.WaitOne(10000, $false) # 10 second timeout
-                        
-                        if ($wait -and $tcpClient.Connected) {
-                            $tcpClient.EndConnect($connect)
-                            $tcpClient.Close()
-                            Write-Host "[OK] TCP connection successful" -ForegroundColor Green
-                            return $true
-                        } else {
-                            if ($tcpClient.Connected) {
-                                $tcpClient.Close()
-                            }
-                            Write-Host "[WARN] TCP connection timeout or failed" -ForegroundColor Yellow
-                            return $false
-                        }
-                    } catch {
-                        Write-Host "[WARN] TCP connection failed: $($_.Exception.Message)" -ForegroundColor Yellow
-                        return $false
-                    } finally {
-                        if ($tcpClient -and $tcpClient.Connected) {
-                            $tcpClient.Close()
-                        }
-                    }
-                } else {
-                    Write-Host "[WARN] Could not parse URL for TCP test" -ForegroundColor Yellow
-                    return $false
-                }
             }
         }
-    } catch {
-        Write-Host "[WARN] Failed to test URL accessibility: $($_.Exception.Message)" -ForegroundColor Yellow
-        return $false
+        catch {
+            if ($try -lt $MaxTries) {
+                Write-Host "   ⏳ URL not accessible yet, waiting ${RetryInterval}s before next attempt..." -ForegroundColor Yellow
+                Start-Sleep -Seconds $RetryInterval
+            }
+            else {
+                Write-Host "⚠️  URL is not accessible after $MaxTries attempts" -ForegroundColor Yellow
+            }
+        }
     }
+    
+    return $false
 }
 
-# Function to expose SHO service
+# Function to expose SHO service with a LoadBalancer and verify it's online
 function Expose-ShoService {
     param(
         [string]$ReleaseName,
@@ -894,21 +868,22 @@ function Expose-ShoService {
     )
     
     $serviceName = $ReleaseName
-    $routeName = "${ReleaseName}-public"
+    $routeName = "$ReleaseName-public"
     $port = 5050
     $maxAttempts = 30
     
-    Write-Host "[INFO] Creating LoadBalancer for service $serviceName..." -ForegroundColor Cyan
+    Write-Host "🌐 Creating LoadBalancer for service $serviceName..." -ForegroundColor Blue
     
     # Check if the source service exists
     try {
         kubectl get svc $serviceName -n $Namespace 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[ERROR] Service $serviceName does not exist in namespace $Namespace" -ForegroundColor Red
+            Write-Host "❌ Error: Service $serviceName does not exist in namespace $Namespace" -ForegroundColor Red
             return $false
         }
-    } catch {
-        Write-Host "[ERROR] Service $serviceName does not exist in namespace $Namespace" -ForegroundColor Red
+    }
+    catch {
+        Write-Host "❌ Error: Service $serviceName does not exist in namespace $Namespace" -ForegroundColor Red
         return $false
     }
     
@@ -916,446 +891,372 @@ function Expose-ShoService {
     try {
         kubectl get svc $routeName -n $Namespace 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[INFO] LoadBalancer does not exist, creating it..." -ForegroundColor Yellow
+            Write-Host "📦 LoadBalancer does not exist, creating it..." -ForegroundColor Blue
             kubectl expose svc $serviceName --name=$routeName --type=LoadBalancer --port=$port --target-port=$port -n $Namespace
             
             if ($LASTEXITCODE -ne 0) {
-                Write-Host "[ERROR] Failed to create LoadBalancer service" -ForegroundColor Red
+                Write-Host "❌ Failed to create LoadBalancer service" -ForegroundColor Red
                 return $false
             }
-        } else {
-            Write-Host "[INFO] LoadBalancer service already exists" -ForegroundColor Blue
         }
-    } catch {
-        Write-Host "[INFO] LoadBalancer does not exist, creating it..." -ForegroundColor Yellow
-        kubectl expose svc $serviceName --name=$routeName --type=LoadBalancer --port=$port --target-port=$port -n $Namespace
+        else {
+            Write-Host "ℹ️ LoadBalancer service already exists" -ForegroundColor Blue
+        }
+    }
+    catch {
+        Write-Host "❌ Failed to create LoadBalancer service: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
     }
     
-    Write-Host "[INFO] Waiting for the LoadBalancer to become ready..." -ForegroundColor Yellow
-    $attempts = 0
+    Write-Host "⏳ Waiting for the LoadBalancer to become ready..." -ForegroundColor Yellow
     
-    while ($attempts -lt $maxAttempts) {
+    for ($attempts = 0; $attempts -lt $maxAttempts; $attempts++) {
         try {
             # Try to get hostname first, then IP if hostname is not available
             $routeUrl = kubectl get svc $routeName -n $Namespace -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>$null
             
-            if (-not $routeUrl) {
+            if ([string]::IsNullOrEmpty($routeUrl)) {
                 $routeUrl = kubectl get svc $routeName -n $Namespace -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null
             }
             
-            if ($routeUrl) {
+            if (![string]::IsNullOrEmpty($routeUrl)) {
                 $fullUrl = "http://${routeUrl}:$port"
-                Write-Host "[OK] LoadBalancer is ready!" -ForegroundColor Green
-                Write-Host "[INFO] The external URL for SHO is: $fullUrl" -ForegroundColor Green
+                Write-Host "✅ LoadBalancer is ready!" -ForegroundColor Green
+                Write-Host "🌐 The external URL for SHO is: $fullUrl" -ForegroundColor Green
                 Write-Host ""
-                Write-Host "[INFO] To access SHO later:" -ForegroundColor Cyan
-                Write-Host "   $fullUrl" -ForegroundColor Gray
+                Write-Host "📝 To access SHO later:" -ForegroundColor White
+                Write-Host "   $fullUrl" -ForegroundColor Cyan
                 Write-Host ""
-                Write-Host "[INFO] To check status:" -ForegroundColor Cyan
-                Write-Host "   kubectl get svc $routeName -n $Namespace" -ForegroundColor Gray
+                Write-Host "📋 To check status:" -ForegroundColor White
+                Write-Host "   kubectl get svc $routeName -n $Namespace" -ForegroundColor Cyan
                 Write-Host ""
-                Write-Host "[INFO] To remove this LoadBalancer:" -ForegroundColor Cyan
-                Write-Host "   kubectl delete svc $routeName -n $Namespace" -ForegroundColor Gray
+                Write-Host "🗑️ To remove this LoadBalancer:" -ForegroundColor White
+                Write-Host "   kubectl delete svc $routeName -n $Namespace" -ForegroundColor Cyan
+                
+                # Wait for DNS record to propagate and service to start responding
+                Write-Host ""
+                Write-Host "🔍 Checking if SHO console is responding..." -ForegroundColor Blue
+                Write-Host "⏳ Waiting for DNS record to propagate..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
                 
                 # Test URL accessibility before opening browser
-                Write-Host ""
-                Write-Host "[INFO] Checking if SHO console is responding..." -ForegroundColor Yellow
-                
-                # Wait a moment for the service to start responding
-                Start-Sleep 20
-                
-                if (Test-UrlAccessible $fullUrl) {
-                    Write-Host "[INFO] SHO console is responding! Opening browser..." -ForegroundColor Green
+                if (Test-UrlAccessible $fullUrl 10) {
+                    Write-Host "🎉 SHO console is responding! Opening browser..." -ForegroundColor Green
+                    
                     try {
                         Start-Process $fullUrl
-                        Write-Host "[OK] Browser opened successfully" -ForegroundColor Green
-                    } catch {
-                        Write-Host "[WARN] Could not open browser automatically: $($_.Exception.Message)" -ForegroundColor Yellow
-                        Write-Host "[INFO] Please open this URL manually:" -ForegroundColor Blue
-                        Write-Host "   $fullUrl" -ForegroundColor Gray
+                        Write-Host "✅ Browser opened successfully" -ForegroundColor Green
                     }
-                } else {
-                    Write-Host "[WARN] SHO console is not yet responding" -ForegroundColor Yellow
-                    Write-Host "[INFO] The LoadBalancer is ready, but the application might still be starting up" -ForegroundColor Blue
-                    Write-Host "[INFO] Please wait a few minutes and try accessing:" -ForegroundColor Blue
-                    Write-Host "   $fullUrl" -ForegroundColor Gray
+                    catch {
+                        Write-Host "ℹ️ Could not open browser automatically. Please open this URL manually:" -ForegroundColor Blue
+                        Write-Host "   $fullUrl" -ForegroundColor Cyan
+                    }
+                }
+                else {
+                    Write-Host "⚠️  SHO console is not yet responding" -ForegroundColor Yellow
+                    Write-Host "ℹ️ The LoadBalancer is ready, but the application might still be starting up" -ForegroundColor Blue
+                    Write-Host "📝 Please wait a few minutes and try accessing:" -ForegroundColor White
+                    Write-Host "   $fullUrl" -ForegroundColor Cyan
                     Write-Host ""
-                    Write-Host "[INFO] You can check the pod status with:" -ForegroundColor Cyan
-                    Write-Host "   kubectl get pods -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Gray
-                    Write-Host "   kubectl logs -n $Namespace -l app.kubernetes.io/instance=$ReleaseName --tail=20" -ForegroundColor Gray
+                    Write-Host "🔍 You can check the pod status with:" -ForegroundColor White
+                    Write-Host "   kubectl get pods -n $Namespace -l app.kubernetes.io/instance=$ReleaseName" -ForegroundColor Cyan
+                    Write-Host "   kubectl logs -n $Namespace -l app.kubernetes.io/instance=$ReleaseName --tail=20" -ForegroundColor Cyan
                 }
                 
                 return $true
             }
-        } catch {
-            # Continue waiting
+            
+            Write-Host "   LoadBalancer not ready yet. Attempt $($attempts + 1)/$maxAttempts - waiting 10 seconds..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
         }
-        
-        Write-Host "   LoadBalancer not ready yet. Attempt $($attempts + 1)/$maxAttempts - waiting 10 seconds..." -ForegroundColor Yellow
-        Start-Sleep 10
-        $attempts++
+        catch {
+            Write-Host "   Error checking LoadBalancer status: $($_.Exception.Message)" -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
+        }
     }
     
-    Write-Host "[ERROR] LoadBalancer creation timed out after $($maxAttempts * 10) seconds" -ForegroundColor Red
+    Write-Host "❌ Error: LoadBalancer creation timed out after $($maxAttempts * 10) seconds" -ForegroundColor Red
     Write-Host "   This might be due to:" -ForegroundColor Yellow
     Write-Host "   - Your cloud provider is still provisioning the LoadBalancer" -ForegroundColor Yellow
     Write-Host "   - Quota limitations in your cloud account" -ForegroundColor Yellow
     Write-Host "   - Network policies blocking external access" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "[INFO] Check status with:" -ForegroundColor Cyan
-    Write-Host "   kubectl get svc $routeName -n $Namespace" -ForegroundColor Gray
-    Write-Host "   kubectl describe svc $routeName -n $Namespace" -ForegroundColor Gray
+    Write-Host "📋 Check status with:" -ForegroundColor White
+    Write-Host "   kubectl get svc $routeName -n $Namespace" -ForegroundColor Cyan
+    Write-Host "   kubectl describe svc $routeName -n $Namespace" -ForegroundColor Cyan
     
     return $false
 }
 
-# Function to uninstall SHO
+# Function to uninstall OutSystems Self-Hosted Operator
 function Uninstall-Sho {
-    param([string]$ReleaseName = "self-hosted-operator")
+    param(
+        [string]$ReleaseName = "self-hosted-operator"
+    )
     
-    $routeName = "${ReleaseName}-public"
+    $routeName = "$ReleaseName-public"
     
-    Write-Host "[WARN] WARNING: You are about to uninstall OutSystems Self-Hosted Operator" -ForegroundColor Red
+    Write-Host "⚠️  WARNING: You are about to uninstall OutSystems Self-Hosted Operator" -ForegroundColor Red
     Write-Host "    This will remove the Helm release, LoadBalancer service, and the namespace" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "    Release: $ReleaseName" -ForegroundColor Gray
-    Write-Host "    Namespace: $NAMESPACE" -ForegroundColor Gray
+    Write-Host "    Release: $ReleaseName" -ForegroundColor White
+    Write-Host "    Namespace: $NAMESPACE" -ForegroundColor White
     Write-Host ""
-    $confirm = Read-Host "[CONFIRM] Are you sure you want to proceed with uninstallation? (yes/no)"
+    $confirm = Read-Host "🚨 Are you sure you want to proceed with uninstallation? (yes/no)"
     
     if ($confirm -ne "yes") {
-        Write-Host "[INFO] Uninstallation cancelled" -ForegroundColor Yellow
+        Write-Host "🛑 Uninstallation cancelled" -ForegroundColor Yellow
         return $true
     }
     
     Write-Host ""
-    Write-Host "[INFO] Uninstalling OutSystems Self-Hosted Operator..." -ForegroundColor Yellow
+    Write-Host "🗑️ Uninstalling OutSystems Self-Hosted Operator..." -ForegroundColor Blue
     
     # Check if the release exists
     try {
         helm status $ReleaseName -n $NAMESPACE 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[ERROR] Release $ReleaseName not found in namespace $NAMESPACE" -ForegroundColor Red
-            Write-Host "   To see installed releases, run: helm list --all-namespaces" -ForegroundColor Gray
+            Write-Host "❌ Error: Release $ReleaseName not found in namespace $NAMESPACE" -ForegroundColor Red
+            Write-Host "   To see installed releases, run: helm list --all-namespaces" -ForegroundColor Yellow
             return $false
         }
-    } catch {
-        Write-Host "[ERROR] Release $ReleaseName not found in namespace $NAMESPACE" -ForegroundColor Red
-        Write-Host "   To see installed releases, run: helm list --all-namespaces" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "❌ Error: Release $ReleaseName not found in namespace $NAMESPACE" -ForegroundColor Red
         return $false
     }
     
     # Check for LoadBalancer service and remove it
-    Write-Host "[INFO] Checking for LoadBalancer service..." -ForegroundColor Cyan
+    Write-Host "🔍 Checking for LoadBalancer service..." -ForegroundColor Blue
     try {
         kubectl get svc $routeName -n $NAMESPACE 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "[INFO] Removing LoadBalancer service $routeName..." -ForegroundColor Yellow
+            Write-Host "🗑️ Removing LoadBalancer service $routeName..." -ForegroundColor Blue
             kubectl delete svc $routeName -n $NAMESPACE
             
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] LoadBalancer service successfully removed" -ForegroundColor Green
-            } else {
-                Write-Host "[WARN] Failed to remove LoadBalancer service" -ForegroundColor Yellow
+                Write-Host "✅ LoadBalancer service successfully removed" -ForegroundColor Green
             }
-        } else {
-            Write-Host "[INFO] No LoadBalancer service found" -ForegroundColor Blue
+            else {
+                Write-Host "⚠️ Failed to remove LoadBalancer service" -ForegroundColor Yellow
+            }
         }
-    } catch {
-        Write-Host "[INFO] No LoadBalancer service found" -ForegroundColor Blue
+        else {
+            Write-Host "ℹ️ No LoadBalancer service found" -ForegroundColor Blue
+        }
+    }
+    catch {
+        Write-Host "ℹ️ No LoadBalancer service found" -ForegroundColor Blue
     }
     
+    Write-Host "Cleaning up resources..." -ForegroundColor Blue
+    
+    # Clean up custom resources
+    try {
+        kubectl get selfhostedruntimes -o name 2>$null | ForEach-Object { kubectl patch $_ --type merge -p '{"metadata":{"finalizers":null}}' 2>$null }
+        kubectl get selfhostedvaultoperators -o name 2>$null | ForEach-Object { kubectl patch $_ --type merge -p '{"metadata":{"finalizers":null}}' 2>$null }
+        kubectl delete selfhostedruntime --ignore-not-found self-hosted-runtime 2>$null
+    }
+    catch {
+        # Ignore errors in cleanup
+    }
+
     # Uninstall the Helm release
     Write-Host ""
-    Write-Host "[INFO] Uninstalling SHO Helm release..." -ForegroundColor Yellow
+    Write-Host "🗑️ Uninstalling SHO Helm release..." -ForegroundColor Blue
+    
     try {
         $uninstallOutput = helm uninstall $ReleaseName -n $NAMESPACE 2>&1
-
+        
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] SHO release $ReleaseName successfully uninstalled" -ForegroundColor Green
-
-            $patchJson = '{"metadata":{"finalizers":null}}'
-            $patchFile = "$env:TEMP\patch.json"
-            Set-Content -Path $patchFile -Value $patchJson -Encoding UTF8
-
+            Write-Host "✅ SHO release $ReleaseName successfully uninstalled" -ForegroundColor Green
+            Write-Host "Waiting for resources to cleanup..." -ForegroundColor Blue
+            Start-Sleep -Seconds 30
+            
+            # Additional cleanup
             try {
-                $selfHostedRuntimes = kubectl get selfhostedruntimes -o name 2>$null
-                if ($selfHostedRuntimes) {
-                    foreach ($runtime in $selfHostedRuntimes) {
-                        kubectl patch $runtime --type merge --patch-file "$patchFile" 2>$null
-                    }
-                }
-            } catch {
-                Write-Host "[WARN] Failed to patch selfhostedruntimes" -ForegroundColor Yellow
-            }
-
-            try {
-                $selfHostedVaultOperators = kubectl get selfhostedvaultoperators -o name 2>$null
-                if ($selfHostedVaultOperators) {
-                    foreach ($operator in $selfHostedVaultOperators) {
-                        kubectl patch $operator --type merge --patch-file "$patchFile" 2>$null
-                    }
-                }
-            } catch {
-                Write-Host "[WARN] Failed to patch selfhostedvaultoperators" -ForegroundColor Yellow
-            }
-
-            try {
-                kubectl delete selfhostedruntime self-hosted-runtime --ignore-not-found=true 2>$null
-            } catch {
-                Write-Host "[WARN] Failed to delete selfhostedruntime" -ForegroundColor Yellow
-            }
-    
-            
-            # Patch and delete namespaces
-            Write-Host "[INFO] Waiting for resources to cleanup..." -ForegroundColor Yellow
-            Start-Sleep 30
-
-            Write-Host "[INFO] Patching vault roles..." -ForegroundColor Yellow
-            try {
-                $vaultRoles = kubectl get vaultroles.self-hosted-vault-operator.outsystemscloud.com -o name 2>$null
-                if ($vaultRoles) {
-                    foreach ($role in $vaultRoles) {
-                        kubectl patch $role --type merge --patch-file "$patchFile" 2>$null
-                    }
-                }
-            } catch {
-                Write-Host "[WARN] Failed to patch vault roles: $($_.Exception.Message)" -ForegroundColor Yellow
-            }
-            
-            Write-Host "[INFO] Patching finalizers in namespaces..." -ForegroundColor Yellow
-            $namespacesToPatch = @(
-                "flux-sdlc", "sh-registry", "vault", "istio-system", "outsystems-gloo-system", 
-                "nats-auth", "flux-system", "outsystems-prometheus", "outsystems-rbac-manager", 
-                "outsystems-stakater", "vault-operator", "seaweedfs"
-            )
-            
-            foreach ($ns in $namespacesToPatch) {
-                Write-Host "   Patching namespace: $ns" -ForegroundColor Gray
-                try {
-                    $resources = kubectl get helmcharts,helmreleases,kustomizations,helmrepositories -n $ns -o name 2>$null
-                    if ($resources) {
-                        foreach ($resource in $resources) {
-                            kubectl patch $resource -n $ns --type merge --patch-file "$patchFile" 2>$null
-                        }
-                    }
-                } catch {
-                    Write-Host "[WARN] Failed to patch resources in namespace $ns" -ForegroundColor Yellow
-                }
-            }
-            
-            Start-Sleep 10
-            
-            Write-Host "[INFO] Cleaning up pods in specific namespaces..." -ForegroundColor Yellow
-            $namespacesToClean = @(
-                "flux-sdlc", "nats-auth", "sh-registry", "seaweedfs", "outsystems-otel", 
-                "outsystems-fluentbit", "outsystems-prometheus", "nats-leaf", "authorization-services"
-            )
-            
-            foreach ($ns in $namespacesToClean) {
-                Write-Host "   Cleaning namespace: $ns" -ForegroundColor Gray
-                try {
-                    $pods = kubectl get pods -n $ns -o name 2>$null
-                    if ($pods) {
-                        foreach ($pod in $pods) {
-                            kubectl delete $pod -n $ns --force
-                        }
-                    }
-                } catch {
-                    Write-Host "[WARN] Failed to clean pods in namespace $ns" -ForegroundColor Yellow
-                }
-            }
-
-                        # Check for namespaces stuck in Terminating state and fix them
-            Write-Host "[INFO] Checking for namespaces stuck in Terminating state..." -ForegroundColor Yellow
-            try {
-                $terminatingNamespaces = kubectl get namespaces --field-selector=status.phase=Terminating -o name 2>$null
+                kubectl get vaultroles.self-hosted-vault-operator.outsystemscloud.com -o name 2>$null | ForEach-Object { kubectl patch $_ --type merge -p '{"metadata":{"finalizers":null}}' 2>$null }
                 
-                if ($terminatingNamespaces) {
-                    Write-Host "[INFO] Found namespaces stuck in Terminating state:" -ForegroundColor Cyan
-                    foreach ($ns in $terminatingNamespaces) {
-                        $nsName = $ns -replace 'namespace/', ''
-                        Write-Host "   - $nsName" -ForegroundColor Gray
-                        
-                        # Get the namespace details to see what's causing the issue
-                        Write-Host "[INFO] Investigating namespace: $nsName" -ForegroundColor Yellow
-                        
-                        # Check for resources with finalizers in this namespace
-                        try {
-                            # Get all resources in the namespace that might have finalizers
-                            $resourceTypes = @(
-                                "pods", "services", "deployments", "replicasets", "configmaps", "secrets",
-                                "persistentvolumeclaims", "persistentvolumes", "ingresses", "networkpolicies",
-                                "helmreleases", "helmcharts", "kustomizations", "helmrepositories",
-                                "serviceroles.auth.nats.outsystemscloud.com",
-                                "vaultroles.self-hosted-vault-operator.outsystemscloud.com",
-                                "selfhostedruntimes", "selfhostedvaultoperators"
-                            )
-                            
-                            foreach ($resourceType in $resourceTypes) {
-                                try {
-                                    $resources = kubectl get $resourceType -n $nsName -o name 2>$null
-                                    if ($resources) {
-                                        Write-Host "   Found $resourceType resources in $nsName, patching finalizers..." -ForegroundColor Gray
-                                        foreach ($resource in $resources) {
-                                            kubectl patch $resource -n $nsName --type merge  --patch-file "$patchFile" 2>$null
-                                        }
-                                        
-                                        # Force delete the resources
-                                        kubectl delete $resourceType --all -n $nsName --force --grace-period=0 2>$null
-                                    }
-                                } catch {
-                                    # Skip if resource type doesn't exist or other errors
-                                    continue
-                                }
-                            }
-                            
-                            # Try to patch the namespace itself to remove finalizers
-                            Write-Host "   Patching namespace finalizers for: $nsName" -ForegroundColor Gray
-                            kubectl patch namespace $nsName --type merge  --patch-file "$patchFile" 2>$null
-                            
-                            # Also try to patch the spec.finalizers
-                            kubectl patch namespace $nsName --type merge --patch-file "$patchFile" 2>$null
-                            
-                        } catch {
-                            Write-Host "[WARN] Failed to patch resources in namespace $nsName" -ForegroundColor Yellow
-                        }
-                    }
-                    
-                    # Wait a bit and check again
-                    Write-Host "[INFO] Waiting for namespace cleanup to complete..." -ForegroundColor Yellow
-                    Start-Sleep 10
-                    
-                    # Check if any namespaces are still terminating
-                    $stillTerminating = kubectl get namespaces --field-selector=status.phase=Terminating -o name 2>$null
-                    if ($stillTerminating) {
-                        Write-Host "[WARN] Some namespaces are still in Terminating state:" -ForegroundColor Yellow
-                        foreach ($ns in $stillTerminating) {
-                            $nsName = $ns -replace 'namespace/', ''
-                            Write-Host "   - $nsName" -ForegroundColor Gray
-                            
-                            # Final attempt: use kubectl replace with empty finalizers
-                            Write-Host "[INFO] Final attempt to force cleanup namespace: $nsName" -ForegroundColor Yellow
-                            try {
-                                # Get current namespace JSON and remove finalizers
-                                $nsJson = kubectl get namespace $nsName -o json 2>$null | ConvertFrom-Json
-                                if ($nsJson) {
-                                    $nsJson.metadata.finalizers = @()
-                                    $nsJson.spec.finalizers = @()
-                                    
-                                    # Convert back to JSON and apply
-                                    $cleanJson = $nsJson | ConvertTo-Json -Depth 10 -Compress
-                                    $tempFile = "$env:TEMP\ns-$nsName.json"
-                                    $cleanJson | Out-File -FilePath $tempFile -Encoding UTF8
-                                    
-                                    kubectl replace --raw "/api/v1/namespaces/$nsName/finalize" -f $tempFile 2>$null
-                                    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-                                }
-                            } catch {
-                                Write-Host "[WARN] Final cleanup attempt failed for namespace $nsName" -ForegroundColor Yellow
-                            }
-                        }
-                    } else {
-                        Write-Host "[OK] All previously terminating namespaces have been cleaned up" -ForegroundColor Green
-                    }
-                } else {
-                    Write-Host "[OK] No namespaces stuck in Terminating state" -ForegroundColor Green
+                $namespacesToClean = @("flux-sdlc", "sh-registry", "vault", "istio-system", "outsystems-gloo-system", "nats-auth", "outsystems-gloo-system", "flux-system", "outsystems-prometheus", "outsystems-rbac-manager", "outsystems-stakater", "vault-operator", "seaweedfs", "authorization-services")
+                
+                foreach ($ns in $namespacesToClean) {
+                    Write-Host "Patching up namespace: $ns" -ForegroundColor Blue
+                    kubectl get helmcharts,helmreleases,kustomizations,helmrepositories -n $ns -o name 2>$null | ForEach-Object { kubectl patch $_ -n $ns --type merge -p '{"metadata":{"finalizers":null}}' 2>$null }
                 }
-            } catch {
-                Write-Host "[WARN] Failed to check for terminating namespaces: $($_.Exception.Message)" -ForegroundColor Yellow
+                
+                Start-Sleep -Seconds 10
+                
+                $namespacesToDelete = @("flux-sdlc", "nats-auth", "sh-registry", "seaweedfs", "outsystems-otel", "outsystems-fluentbit", "outsystems-prometheus", "nats-auth", "nats-leaf", "authorization-services")
+                
+                foreach ($ns in $namespacesToDelete) {
+                    Write-Host "Cleaning up namespace: $ns" -ForegroundColor Blue
+                    kubectl get pods -n $ns -o name 2>$null | ForEach-Object { kubectl delete $_ -n $ns --force 2>$null }
+                }
+            }
+            catch {
+                # Ignore cleanup errors
             }
             
-            Write-Host "[OK] Cleanup operations completed" -ForegroundColor Green
-
-            Write-Host "[OK] Cleanup operations completed" -ForegroundColor Green
-            
-            Write-Host "[INFO] Deleting namespaces..." -ForegroundColor Yellow
-            try {
-                kubectl delete namespace $NAMESPACE --wait=false 2>$null
-                kubectl delete namespace $NAMESPACE_CRED_JOB --wait=false 2>$null
+            Write-Host "🗑️ Deleting namespace $NAMESPACE..." -ForegroundColor Blue
+            kubectl delete namespace $NAMESPACE --wait=false 2>$null
+            kubectl delete namespace $NAMESPACE_CRED_JOB --wait=false 2>$null
                 
-                Write-Host "[OK] Namespace deletion initiated" -ForegroundColor Green
-                Write-Host "   Note: Namespace deletion might take some time to complete" -ForegroundColor Gray
-            } catch {
-                Write-Host "[ERROR] Failed to delete namespace" -ForegroundColor Red
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ Namespace deletion initiated" -ForegroundColor Green
+                Write-Host "   Note: Namespace deletion might take some time to complete" -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "❌ Failed to delete namespace" -ForegroundColor Red
             }
         }
-    } catch {
-        Write-Host "[ERROR] Failed to uninstall SHO release: $($_.Exception.Message)" -ForegroundColor Red
+        else {
+            Write-Host "❌ Failed to uninstall SHO release" -ForegroundColor Red
+            Write-Host "🔍 Error details:" -ForegroundColor Blue
+            Write-Host $uninstallOutput
+            return $false
+        }
+    }
+    catch {
+        Write-Host "❌ Failed to uninstall SHO release: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
+    
+    Write-Host ""
+    Write-Host "🎉 OutSystems Self-Hosted Operator was successfully uninstalled!" -ForegroundColor Green
+    return $true
 }
 
 # Main execution
-try {
-    # Show help if requested
-    if ($Help) {
-        Show-Usage
-        exit 0
+if ($Help) {
+    Show-Usage
+    exit 0
+}
+
+# Handle GetConsoleUrl
+if ($GetConsoleUrl) {
+    # Check SHO is installed
+    try {
+        helm status $CHART_NAME -n $NAMESPACE 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Error: OutSystems Self-Hosted Operator is not installed" -ForegroundColor Red
+            Write-Host "   Please install it first using: .\installer.ps1" -ForegroundColor Yellow
+            exit 1
+        }
+    }
+    catch {
+        Write-Host "❌ Error: OutSystems Self-Hosted Operator is not installed" -ForegroundColor Red
+        exit 1
     }
     
-    # Check if LocalInstall is requested
-    if ($LocalInstall) {
-        Write-Host "[INFO] Local installation mode enabled - tools will be installed in current directory" -ForegroundColor Blue
-    } else {
-        # Check for administrator privileges first
-        if (-not (Test-IsAdmin)) {
-            Write-Host "[INFO] Checking if administrator privileges are needed..." -ForegroundColor Cyan
-            # Only require admin if we need to install tools system-wide
-            if (-not (Test-CommandExists "helm") -or -not (Test-CommandExists "kubectl")) {
-                Write-Host "[INFO] Tools not found and no admin privileges. Using local installation..." -ForegroundColor Yellow
-                $LocalInstall = $true
+    # Get the LoadBalancer service URL
+    Write-Host "🌐 Retrieving LoadBalancer service URL for $CHART_NAME..." -ForegroundColor Blue
+    
+    try {
+        kubectl get svc "$CHART_NAME-public" -n $NAMESPACE 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $routeUrl = kubectl get svc "$CHART_NAME-public" -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>$null
+            if ([string]::IsNullOrEmpty($routeUrl)) {
+                $routeUrl = kubectl get svc "$CHART_NAME-public" -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null
+            }
+            
+            if (![string]::IsNullOrEmpty($routeUrl)) {
+                Write-Host "✅ LoadBalancer URL: http://$routeUrl`:5050" -ForegroundColor Green
+                $fullUrl = "http://${routeUrl}:5050"
+                
+                if (Test-UrlAccessible $fullUrl 10) {
+                    Write-Host "🎉 SHO console is responding! Opening browser..." -ForegroundColor Green
+                    
+                    try {
+                        Start-Process $fullUrl
+                        Write-Host "✅ Browser opened successfully" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Host "ℹ️ Could not open browser automatically. Please open this URL manually:" -ForegroundColor Blue
+                        Write-Host "   $fullUrl" -ForegroundColor Cyan
+                    }
+                }
+                exit 0
+            }
+            else {
+                Write-Host "❌ Error: LoadBalancer service URL not found. Please contact support!!!" -ForegroundColor Red
+                exit 1
             }
         }
+        else {
+            Write-Host "❌ Error: LoadBalancer service $CHART_NAME-public not found in namespace $NAMESPACE. Creating it now..." -ForegroundColor Red
+            Expose-ShoService $CHART_NAME $NAMESPACE
+            exit 0
+        }
     }
-    
-    # Show current configuration
-    Write-Host "=== Configuration ===" -ForegroundColor White
-    Write-Host "Repository URL: $CHART_REPO" -ForegroundColor Gray
-    Write-Host "Version: $HELM_CHART_VERSION" -ForegroundColor Gray
+    catch {
+        Write-Host "❌ Error retrieving console URL: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}
+
+if ($Uninstall) {
+    Write-Host "🗑️ Uninstalling OutSystems Self-Hosted Operator..." -ForegroundColor Blue
+    Uninstall-Sho $CHART_NAME
+    exit 0
+}
+
+# Set version from parameter
+if ($Version) {
+    $script:HELM_CHART_VERSION = $Version
+    Write-Host "📝 Using version: $script:HELM_CHART_VERSION" -ForegroundColor Blue
+}
+
+# Set repository from parameter
+if ($Repository) {
+    $script:CHART_REPO = "$Repository/$CHART_NAME"
+    Write-Host "📝 Using repository: $Repository" -ForegroundColor Blue
+}
+
+# Set default version if not provided
+if ([string]::IsNullOrEmpty($script:HELM_CHART_VERSION)) {
+    Write-Host "📝 Version not provided, checking latest version available" -ForegroundColor Blue
+    if (!(Get-LatestShoVersion)) {
+        Write-Host "❌ Failed to get latest version" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Show current configuration
+Write-Host "=== Configuration ===" -ForegroundColor White
+Write-Host "Repository URL: $script:CHART_REPO" -ForegroundColor Gray
+Write-Host "Version: $script:HELM_CHART_VERSION" -ForegroundColor Gray
+Write-Host ""
+
+Write-Host "🔍 Checking all dependencies..." -ForegroundColor Blue
+if (!(Test-Dependencies)) {
+    Write-Host "💥 Please resolve dependency issues before proceeding" -ForegroundColor Red
+    Write-Host "💡 Run '.\installer.ps1 -Help' for usage information" -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host ""
+Write-Host "🔍 Analyzing Kubernetes cluster..." -ForegroundColor Blue
+Get-ClusterType
+
+Write-Host ""
+Write-Host "🚀 Ready to install SHO!" -ForegroundColor Green
+
+if (Install-Sho) {
+    Expose-ShoService $CHART_NAME $NAMESPACE
     Write-Host ""
-    
-    if ($Uninstall) {
-        Write-Host "[INFO] Uninstalling OutSystems Self-Hosted Operator..." -ForegroundColor Yellow
-        if (-not (Uninstall-Sho $CHART_NAME)) {
-            exit 1
-        }
-    } else {
-        Write-Host "=== OutSystems Self-Hosted Operator Installation Dependencies Check ===" -ForegroundColor White
-        
-        if (-not (Test-Dependencies)) {
-            Write-Host ""
-            Write-Host "[ERROR] Please resolve dependency issues before proceeding" -ForegroundColor Red
-            Write-Host "[INFO] Run '.\install.ps1 -Help' for usage information" -ForegroundColor Blue
-            exit 1
-        }
-        
-        # Identify cluster type
-        Invoke-ClusterIdentification
-        
-        Write-Host ""
-        Write-Host "[INFO] Ready to install SHO!" -ForegroundColor Green
-        
-        if (-not (Install-Sho)) {
-            exit 1
-        }
-        
-        if (-not (Expose-ShoService $CHART_NAME $NAMESPACE)) {
-            Write-Host "[WARN] SHO installed but LoadBalancer setup failed" -ForegroundColor Yellow
-        }
-        
-        Write-Host ""
-        Write-Host "[SUCCESS] OutSystems Self-Hosted Operator was successfully installed!" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "Your OutSystems Self-Hosted environment is now ready for use." -ForegroundColor Cyan
-        Write-Host "[INFO] Management Commands:" -ForegroundColor Yellow
-        Write-Host "   helm status $CHART_NAME -n $NAMESPACE" -ForegroundColor Gray
-        Write-Host "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=self-hosted-operator" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "[INFO] To uninstall:" -ForegroundColor Yellow
-        Write-Host "   .\install.ps1 -Uninstall" -ForegroundColor Gray
-    }
-} catch {
-    Write-Host "[ERROR] An error occurred: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "🎉 OutSystems Self-Hosted Operator was successfully installed!" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Your OutSystems Self-Hosted environment is now ready for use." -ForegroundColor White
+    Write-Host "📊 Management Commands:" -ForegroundColor White
+    Write-Host "   helm status $CHART_NAME -n $NAMESPACE" -ForegroundColor Cyan
+    Write-Host "   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$CHART_NAME" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "🗑️  To uninstall:" -ForegroundColor White
+    Write-Host "   .\installer.ps1 -Uninstall" -ForegroundColor Cyan
+}
+else {
+    Write-Host ""
+    Write-Host "💥 Installation failed. Please check the error messages above." -ForegroundColor Red
+    Write-Host "💡 Run '.\installer.ps1 -Help' for usage information" -ForegroundColor Yellow
     exit 1
 }

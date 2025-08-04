@@ -7,19 +7,22 @@ NAMESPACE="self-hosted-operator"
 NAMESPACE_CRED_JOB="self-hosted-registry-credentials-job"
 
 CHART_NAME="self-hosted-operator"
+# TODO: Update with ga ecr repo when available
 HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
 IMAGE_REPOSITORY="self-hosted-operator"
+REPO="g4u4y4x2/lab/helm/self-hosted-operator"
 
 SH_REGISTRY=${SH_REGISTRY:-""}
 
 # Setup environment configs
-if [[ $ENV == "production" ]]; then
-    echo "🔧 Setting environment to production"
-    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/j0s5s8b0/ga/helm"}
+if [[ $ENV == "non-prod" ]]; then
+    echo "🔧 Setting environment to non production"
+    # TODO: Update with test ecr repo when available
+    HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
     CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
-    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/j0s5s8b0/ga"}
+    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
 
 fi
 
@@ -130,9 +133,137 @@ ensure_helm_installed() {
     fi
 }
 
+# Function to install AWS CLI on Linux
+install_aws_cli() {
+    echo "🚀 Installing AWS CLI..."
+    
+    # Detect Linux distribution type
+    if command -v apt-get &> /dev/null; then
+        echo "📦 Installing AWS CLI via apt..."
+        sudo apt-get update
+        sudo apt-get install -y awscli
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ AWS CLI installed successfully via apt"
+            aws --version
+            return 0
+        else
+            echo "❌ Failed to install AWS CLI via apt, trying direct download..."
+        fi
+    elif command -v yum &> /dev/null; then
+        echo "📦 Installing AWS CLI via yum..."
+        sudo yum install -y awscli
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ AWS CLI installed successfully via yum"
+            aws --version
+            return 0
+        else
+            echo "❌ Failed to install AWS CLI via yum, trying direct download..."
+        fi
+    elif command -v dnf &> /dev/null; then
+        echo "📦 Installing AWS CLI via dnf..."
+        sudo dnf install -y awscli
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ AWS CLI installed successfully via dnf"
+            aws --version
+            return 0
+        else
+            echo "❌ Failed to install AWS CLI via dnf, trying direct download..."
+        fi
+    fi
+    
+    # Fallback to direct download installation
+    echo "📦 Installing AWS CLI via direct download..."
+    
+    # Download and install AWS CLI using the official installer
+    echo "📥 Downloading AWS CLI installer..."
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    
+    if [ $? -eq 0 ]; then
+        echo "📦 Installing AWS CLI..."
+        unzip -q awscliv2.zip
+        sudo ./aws/install
+        
+        # Clean up the installer
+        rm -rf awscliv2.zip aws/
+        
+        if command -v aws &> /dev/null; then
+            echo "✅ AWS CLI installed successfully"
+            aws --version
+            return 0
+        else
+            echo "❌ AWS CLI installation verification failed"
+            return 1
+        fi
+    else
+        echo "❌ Failed to download AWS CLI installer"
+        return 1
+    fi
+}
+
+# Function to ensure AWS CLI is installed
+ensure_aws_cli_installed() {
+    echo "🔍 Checking AWS CLI installation..."
+    
+    if command -v aws &> /dev/null; then
+        echo "✅ AWS CLI is already installed"
+        aws --version
+        return 0
+    else
+        echo "🔧 AWS CLI not found. Proceeding with installation..."
+        install_aws_cli
+        return $?
+    fi
+}
+
 # Function to check all dependencies required for helm chart installation
 check_dependencies() {
     local all_deps_ok=true
+    
+    # Check AWS CLI (required for ECR authentication)
+    echo "📋 Checking AWS CLI..."
+    if ! ensure_aws_cli_installed; then
+        echo "❌ Failed to ensure AWS CLI is available"
+        all_deps_ok=false
+    fi
+    
+    # Check jq (required for JSON parsing)
+    echo "📋 Checking jq..."
+    if ! command -v jq &> /dev/null; then
+        echo "❌ jq is not installed. Installing jq..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get install -y jq
+            if [ $? -eq 0 ]; then
+                echo "✅ jq installed successfully via apt"
+            else
+                echo "❌ Failed to install jq via apt"
+                all_deps_ok=false
+            fi
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y jq
+            if [ $? -eq 0 ]; then
+                echo "✅ jq installed successfully via yum"
+            else
+                echo "❌ Failed to install jq via yum"
+                all_deps_ok=false
+            fi
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y jq
+            if [ $? -eq 0 ]; then
+                echo "✅ jq installed successfully via dnf"
+            else
+                echo "❌ Failed to install jq via dnf"
+                all_deps_ok=false
+            fi
+        else
+            echo "❌ Package manager not found. Please install jq manually"
+            all_deps_ok=false
+        fi
+    else
+        echo "✅ jq is already installed"
+    fi
     
     # Check Helm
     echo "📋 Checking Helm..."
@@ -158,14 +289,6 @@ check_dependencies() {
         echo "   - A valid kubeconfig file"
         echo "   - Access to a Kubernetes cluster"
         echo "   - Proper cluster permissions"
-        all_deps_ok=false
-    fi
-    
-    # verify OutSystems helm repository
-    if verify_repo_access; then
-        echo "✅ OutSystems repository is ready"
-    else
-        echo "❌ SHO repository verification failed"
         all_deps_ok=false
     fi
     
@@ -200,11 +323,11 @@ identify_cluster() {
     
     # Determine cluster type based on node labels
     if kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'openshift'; then
-        CLUSTER_TYPE="openshift"
+        CLUSTER_TYPE="ocp"
     elif kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'azure'; then
-        CLUSTER_TYPE="aks"
+        CLUSTER_TYPE="azure"
     elif kubectl get nodes --output=jsonpath='{.items[0].metadata.labels}' | grep -q 'eks.amazonaws.com'; then
-        CLUSTER_TYPE="eks"
+        CLUSTER_TYPE="aws"
     else
         CLUSTER_TYPE="unknown"
     fi
@@ -221,6 +344,85 @@ identify_cluster() {
     fi
 }
 
+# Get latest self-hosted operator version
+get_latest_sho_version() {
+    echo "🔍 Fetching latest OutSystems Self-Hosted Operator version..."
+    
+    # Use the same token method as the ECR authentication
+    local token_response
+    token_response=$(curl -sL "https://public.ecr.aws/token?scope=repository:${REPO}:pull" 2>/dev/null)
+    
+    if [ $? -ne 0 ] || [ -z "$token_response" ]; then
+        echo "❌ Failed to get token from ECR public API"
+        return 1
+    fi
+    
+    local token
+    token=$(echo "$token_response" | jq -r '.token' 2>/dev/null)
+    
+    if [ -z "$token" ] || [ "$token" = "null" ]; then
+        echo "❌ Failed to extract token from ECR response"
+        return 1
+    fi
+    
+    # Get tags using the token
+    local tags_response
+    tags_response=$(curl -s -H "Authorization: Bearer $token" \
+        "https://public.ecr.aws/v2/${REPO}/tags/list" 2>/dev/null)
+    
+    if [ $? -ne 0 ] || [ -z "$tags_response" ]; then
+        echo "❌ Failed to fetch tags from ECR repository"
+        return 1
+    fi
+    
+    local tags
+    tags=$(echo "$tags_response" | jq -r '.tags[]' 2>/dev/null)
+    
+    if [ -z "$tags" ]; then
+        echo "❌ No tags found in ECR repository response"
+        return 1
+    fi
+    
+    local latest_version
+    latest_version=$(echo "$tags" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+    
+    if [ -z "$latest_version" ]; then
+        echo "❌ Failed to find a valid version from tags"
+        echo "Available tags: $tags"
+        return 1
+    fi
+    
+    echo "✅ Latest version found: $latest_version"
+    export HELM_CHART_VERSION="$latest_version"
+    return 0
+}
+
+# Function to authenticate with ECR public registry using AWS CLI
+ecr_helm_login() {
+    echo "🔐 Setting up ECR public registry access for Helm..."
+    
+    # Check if AWS CLI is available
+    if ! command -v aws &> /dev/null; then
+        echo "❌ AWS CLI is not installed or not available in PATH"
+        echo "💡 Please ensure AWS CLI is installed by running the dependency check"
+        return 1
+    fi
+    
+    echo "🔑 Using AWS CLI for ECR public authentication..."
+    
+    # Login using AWS CLI and Helm
+    aws ecr-public get-login-password --region us-east-1 2>/dev/null | helm registry login --username AWS --password-stdin public.ecr.aws 2>&1
+    if [[ $? -ne 0 ]]; then
+        echo "❌ Failed to authenticate with ECR public registry"
+        echo "💡 Possible reasons:"
+        echo "   - No AWS credentials available"
+        echo "   - Network connectivity issues"
+        echo "   - Insufficient permissions"
+        echo ""
+        return 1
+    fi
+}
+
 # Function to show usage
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -229,6 +431,8 @@ show_usage() {
     echo "  --version=VERSION        The SHO chart version to install (optional, defaults to latest)"
     echo "  --repository=REPO_URL    The SHO registry URL (optional, uses default if not specified)"
     echo "  --uninstall              Uninstall OutSystems Self-Hosted Operator"
+    echo "  --env                    Set the environment (non-prod, prod, etc.)"
+    echo "  --get-console-url        Get the console URL for the installed SHO"
     echo "  --help, -h               Show this help message"
     echo ""
     echo "Examples:"
@@ -236,11 +440,18 @@ show_usage() {
     echo "  $0 --version=1.2.3"
     echo "  $0 --repository=registry.example.com"
     echo "  $0 --version=1.2.3 --repository=registry.example.com"
+    echo "  $0 --env=non-prod --get-console-url"
 }
 
 # Function to install OutSystems Self-Hosted Operator
 sho_install() {
     echo "🚀 Installing OutSystems Self-Hosted Operator..."
+    
+    # Authenticate with ECR public registry
+    if ! ecr_helm_login; then
+        echo "❌ Failed to authenticate with ECR public registry"
+        return 1
+    fi
     
     # Prepare the chart URL
     if [ "$HELM_CHART_VERSION" != "latest" ]; then
@@ -268,6 +479,8 @@ sho_install() {
         --set image.repository="${IMAGE_REPOSITORY}" \
         --set image.tag="${IMAGE_VERSION}" \
         --set registry.url="$SH_REGISTRY" \
+        --set registry.username="${SP_ID}" \
+        --set registry.password="${SP_SECRET}" \
         --set-string podAnnotations.timestamp="$TIMESTAMP" \
         --set platform="${CLUSTER_TYPE}" \
         --set scc.create="${SCC_CREATION}")
@@ -546,8 +759,8 @@ show_troubleshooting_commands() {
 test_url_accessible() {
     local url="$1"
     local timeout=10
-    local max_tries=10  # Default to 6 tries (1 minute with 10s intervals)
-    local retry_interval=10    # Wait 5 seconds between retries
+    local max_tries=10  # Default to 10 tries
+    local retry_interval=20    # Wait 20 seconds between retries
     local try=1
     
     echo "🔍 Testing URL accessibility: $url"
@@ -794,7 +1007,12 @@ if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
                 ;;
             --env=*)
                 ENV="${1#*=}"
-                echo "📝 Setting current envrionment: $ENV"
+                echo "📝 Setting current environment: $ENV"
+                shift
+                ;;
+            --get-console-url)
+                GET_CONSOLE_URL=true
+                echo "🔍 Get console url operation selected."
                 shift
                 ;;
             *)
@@ -805,23 +1023,70 @@ if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
                 ;;
         esac
     done
+
+    # Check if SHO console url is needed
+    if [ "$GET_CONSOLE_URL" = true ]; then
+        # Check SHO is installed
+        if ! helm status "$CHART_NAME" -n "$NAMESPACE" &>/dev/null; then
+            echo "❌ Error: OutSystems Self-Hosted Operator is not installed"
+            echo "   Please install it first using: $0"
+            exit 1
+        fi
+        # Get the LoadBalancer service URL
+        echo "🌐 Retrieving LoadBalancer service URL for $CHART_NAME..."
+        if kubectl get svc "$CHART_NAME-public" -n "$NAMESPACE" >/dev/null 2>&1; then
+            route_url=$(kubectl get svc "$CHART_NAME-public" -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+            if [ -z "$route_url" ]; then
+                route_url=$(kubectl get svc "$CHART_NAME-public" -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+            fi
+
+            if [ -n "$route_url" ]; then
+                echo "✅ LoadBalancer URL: http://$route_url:5050"
+                local full_url="http://${route_url}:5050"
+
+                if test_url_accessible "$full_url" 10; then
+                   echo "🎉 SHO console is responding! Opening browser..."
+
+                   if command -v open &>/dev/null; then
+                        # macOS
+                        open "$full_url"
+                        echo "✅ Browser opened successfully"
+                    else
+                        echo "ℹ️ Could not detect a browser opener. Please open this URL manually:"
+                        echo "   $full_url"
+                    fi
+                fi
+                exit 0
+            else
+                echo "❌ Error: LoadBalancer service URL not found. Please contact support!!!"
+                exit 1    
+            fi
+        else
+            echo "❌ Error: LoadBalancer service $CHART_NAME-public not found in namespace $NAMESPACE. Creating it now..."
+            expose_sho_service "$CHART_NAME" "$NAMESPACE"
+            exit 0
+        fi
+    fi
+
+    if [ "$UNINSTALL_MODE" = true ]; then
+        echo "🗑️ Uninstalling OutSystems Self-Hosted Operator..."
+        uninstall_sho "$CHART_NAME" "$NAMESPACE"
+        exit 0
+    fi
     
     # Set default version if not provided
     if [ -z "$HELM_CHART_VERSION" ]; then
-        echo "📝 Version not provided, using latest"
-        export HELM_CHART_VERSION="latest"
+        echo "📝 Version not provided, checking latest version available"
+        get_latest_sho_version
     fi
-    
+
     # Show current configuration
     echo "=== Configuration ==="
     echo "Repository URL: ${CHART_REPO}"
     echo "Version: ${HELM_CHART_VERSION}"
     echo ""
+
     
-    if [ "$UNINSTALL_MODE" = true ]; then
-        echo "🗑️ Uninstalling OutSystems Self-Hosted Operator..."
-        uninstall_sho "$CHART_NAME" "$NAMESPACE"
-    else
     echo "=== OutSystems Self-Hosted Operator Installation Dependencies Check ==="
     check_dependencies
     
@@ -848,6 +1113,5 @@ if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
         echo "💥 Please resolve dependency issues before proceeding"
         echo "💡 Run '$0 --help' for usage information"
         exit 1
-    fi
     fi
 fi
