@@ -12,6 +12,7 @@ HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
 IMAGE_REPOSITORY="self-hosted-operator"
+REPO="g4u4y4x2/lab/helm/self-hosted-operator"
 
 SH_REGISTRY=${SH_REGISTRY:-""}
 
@@ -132,9 +133,137 @@ ensure_helm_installed() {
     fi
 }
 
+# Function to install AWS CLI on Linux
+install_aws_cli() {
+    echo "🚀 Installing AWS CLI..."
+    
+    # Detect Linux distribution type
+    if command -v apt-get &> /dev/null; then
+        echo "📦 Installing AWS CLI via apt..."
+        sudo apt-get update
+        sudo apt-get install -y awscli
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ AWS CLI installed successfully via apt"
+            aws --version
+            return 0
+        else
+            echo "❌ Failed to install AWS CLI via apt, trying direct download..."
+        fi
+    elif command -v yum &> /dev/null; then
+        echo "📦 Installing AWS CLI via yum..."
+        sudo yum install -y awscli
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ AWS CLI installed successfully via yum"
+            aws --version
+            return 0
+        else
+            echo "❌ Failed to install AWS CLI via yum, trying direct download..."
+        fi
+    elif command -v dnf &> /dev/null; then
+        echo "📦 Installing AWS CLI via dnf..."
+        sudo dnf install -y awscli
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ AWS CLI installed successfully via dnf"
+            aws --version
+            return 0
+        else
+            echo "❌ Failed to install AWS CLI via dnf, trying direct download..."
+        fi
+    fi
+    
+    # Fallback to direct download installation
+    echo "📦 Installing AWS CLI via direct download..."
+    
+    # Download and install AWS CLI using the official installer
+    echo "📥 Downloading AWS CLI installer..."
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    
+    if [ $? -eq 0 ]; then
+        echo "📦 Installing AWS CLI..."
+        unzip -q awscliv2.zip
+        sudo ./aws/install
+        
+        # Clean up the installer
+        rm -rf awscliv2.zip aws/
+        
+        if command -v aws &> /dev/null; then
+            echo "✅ AWS CLI installed successfully"
+            aws --version
+            return 0
+        else
+            echo "❌ AWS CLI installation verification failed"
+            return 1
+        fi
+    else
+        echo "❌ Failed to download AWS CLI installer"
+        return 1
+    fi
+}
+
+# Function to ensure AWS CLI is installed
+ensure_aws_cli_installed() {
+    echo "🔍 Checking AWS CLI installation..."
+    
+    if command -v aws &> /dev/null; then
+        echo "✅ AWS CLI is already installed"
+        aws --version
+        return 0
+    else
+        echo "🔧 AWS CLI not found. Proceeding with installation..."
+        install_aws_cli
+        return $?
+    fi
+}
+
 # Function to check all dependencies required for helm chart installation
 check_dependencies() {
     local all_deps_ok=true
+    
+    # Check AWS CLI (required for ECR authentication)
+    echo "📋 Checking AWS CLI..."
+    if ! ensure_aws_cli_installed; then
+        echo "❌ Failed to ensure AWS CLI is available"
+        all_deps_ok=false
+    fi
+    
+    # Check jq (required for JSON parsing)
+    echo "📋 Checking jq..."
+    if ! command -v jq &> /dev/null; then
+        echo "❌ jq is not installed. Installing jq..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get install -y jq
+            if [ $? -eq 0 ]; then
+                echo "✅ jq installed successfully via apt"
+            else
+                echo "❌ Failed to install jq via apt"
+                all_deps_ok=false
+            fi
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y jq
+            if [ $? -eq 0 ]; then
+                echo "✅ jq installed successfully via yum"
+            else
+                echo "❌ Failed to install jq via yum"
+                all_deps_ok=false
+            fi
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y jq
+            if [ $? -eq 0 ]; then
+                echo "✅ jq installed successfully via dnf"
+            else
+                echo "❌ Failed to install jq via dnf"
+                all_deps_ok=false
+            fi
+        else
+            echo "❌ Package manager not found. Please install jq manually"
+            all_deps_ok=false
+        fi
+    else
+        echo "✅ jq is already installed"
+    fi
     
     # Check Helm
     echo "📋 Checking Helm..."
@@ -215,6 +344,85 @@ identify_cluster() {
     fi
 }
 
+# Get latest self-hosted operator version
+get_latest_sho_version() {
+    echo "🔍 Fetching latest OutSystems Self-Hosted Operator version..."
+    
+    # Use the same token method as the ECR authentication
+    local token_response
+    token_response=$(curl -sL "https://public.ecr.aws/token?scope=repository:${REPO}:pull" 2>/dev/null)
+    
+    if [ $? -ne 0 ] || [ -z "$token_response" ]; then
+        echo "❌ Failed to get token from ECR public API"
+        return 1
+    fi
+    
+    local token
+    token=$(echo "$token_response" | jq -r '.token' 2>/dev/null)
+    
+    if [ -z "$token" ] || [ "$token" = "null" ]; then
+        echo "❌ Failed to extract token from ECR response"
+        return 1
+    fi
+    
+    # Get tags using the token
+    local tags_response
+    tags_response=$(curl -s -H "Authorization: Bearer $token" \
+        "https://public.ecr.aws/v2/${REPO}/tags/list" 2>/dev/null)
+    
+    if [ $? -ne 0 ] || [ -z "$tags_response" ]; then
+        echo "❌ Failed to fetch tags from ECR repository"
+        return 1
+    fi
+    
+    local tags
+    tags=$(echo "$tags_response" | jq -r '.tags[]' 2>/dev/null)
+    
+    if [ -z "$tags" ]; then
+        echo "❌ No tags found in ECR repository response"
+        return 1
+    fi
+    
+    local latest_version
+    latest_version=$(echo "$tags" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+    
+    if [ -z "$latest_version" ]; then
+        echo "❌ Failed to find a valid version from tags"
+        echo "Available tags: $tags"
+        return 1
+    fi
+    
+    echo "✅ Latest version found: $latest_version"
+    export HELM_CHART_VERSION="$latest_version"
+    return 0
+}
+
+# Function to authenticate with ECR public registry using AWS CLI
+ecr_helm_login() {
+    echo "🔐 Setting up ECR public registry access for Helm..."
+    
+    # Check if AWS CLI is available
+    if ! command -v aws &> /dev/null; then
+        echo "❌ AWS CLI is not installed or not available in PATH"
+        echo "💡 Please ensure AWS CLI is installed by running the dependency check"
+        return 1
+    fi
+    
+    echo "🔑 Using AWS CLI for ECR public authentication..."
+    
+    # Login using AWS CLI and Helm
+    aws ecr-public get-login-password --region us-east-1 2>/dev/null | helm registry login --username AWS --password-stdin public.ecr.aws 2>&1
+    if [[ $? -ne 0 ]]; then
+        echo "❌ Failed to authenticate with ECR public registry"
+        echo "💡 Possible reasons:"
+        echo "   - No AWS credentials available"
+        echo "   - Network connectivity issues"
+        echo "   - Insufficient permissions"
+        echo ""
+        return 1
+    fi
+}
+
 # Function to show usage
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -238,6 +446,12 @@ show_usage() {
 # Function to install OutSystems Self-Hosted Operator
 sho_install() {
     echo "🚀 Installing OutSystems Self-Hosted Operator..."
+    
+    # Authenticate with ECR public registry
+    if ! ecr_helm_login; then
+        echo "❌ Failed to authenticate with ECR public registry"
+        return 1
+    fi
     
     # Prepare the chart URL
     if [ "$HELM_CHART_VERSION" != "latest" ]; then
