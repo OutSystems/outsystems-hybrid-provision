@@ -10,7 +10,7 @@ CHART_NAME="self-hosted-operator"
 # TODO: Update with ga ecr repo when available
 HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
 CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
-IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
+IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2/lab"}
 IMAGE_REPOSITORY="self-hosted-operator"
 REPO="g4u4y4x2/lab/helm/self-hosted-operator"
 
@@ -22,7 +22,7 @@ if [[ $ENV == "non-prod" ]]; then
     # TODO: Update with test ecr repo when available
     HELM_REPO_URL=${HELM_REPO_URL:-"oci://public.ecr.aws/g4u4y4x2/lab/helm"}
     CHART_REPO=$HELM_REPO_URL"/$CHART_NAME"
-    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2"}
+    IMAGE_REGISTRY=${IMAGE_REGISTRY:-"public.ecr.aws/g4u4y4x2/lab"}
 
 fi
 
