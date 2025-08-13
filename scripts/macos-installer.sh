@@ -1,0 +1,899 @@
+#!/bin/bash
+
+set -e
+
+# Script Configuration
+SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
+if [[ -z "$SCRIPT_NAME" || "$SCRIPT_NAME" == "-" ]]; then
+    SCRIPT_NAME="macos-installer.sh"
+fi
+SCRIPT_VERSION="1.0.0"
+
+# Default Configuration
+NAMESPACE="self-hosted-operator"
+CHART_NAME="self-hosted-operator"
+IMAGE_NAME="self-hosted-operator"
+DEFAULT_ENV="prod"
+DEFAULT_OPERATION="install"
+DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
+
+# Environment-specific settings
+ECR_ALIAS_PROD="j0s5s8b0"    # GA ECR alias
+ECR_ALIAS_NON_PROD="g4u4y4x2" # Lab ECR alias
+PUB_REGISTRY="public.ecr.aws"
+
+# Global variables (set by parse_arguments)
+SHO_VERSION=""
+ENV="$DEFAULT_ENV"
+OPERATION="$DEFAULT_OPERATION"
+USE_ACR="$DEFAULT_USE_ACR"
+
+# Derived configuration (set by setup_environment)
+ECR_ALIAS=""
+CHART_REPOSITORY=""
+IMAGE_REGISTRY=""
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging functions
+log_info() {
+    echo -e "${BLUE}ℹ️  $1${NC}"
+}
+
+log_success() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+log_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+log_step() {
+    echo -e "${BLUE}🔍 $1${NC}"
+}
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for macOS
+
+USAGE:
+    ${SCRIPT_NAME} [OPTIONS]
+
+OPTIONS:
+    --version=VERSION        SHO version to install/manage (default: latest)
+    --env=ENVIRONMENT       Environment: prod, non-prod (default: prod)
+    --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
+    --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
+                           [TEMPORARY: Backward compatibility for Azure ACR]
+    --help, -h              Show this help message
+
+OPERATIONS:
+    install                 Install OutSystems Self-Hosted Operator
+    uninstall              Uninstall OutSystems Self-Hosted Operator  
+    get-console-url        Get console URL for installed SHO
+
+EXAMPLES:
+    # Install latest version in prod environment
+    ${SCRIPT_NAME}
+    
+    # Install specific version in non-prod environment
+    ${SCRIPT_NAME} --operation=install --version=0.2.3 --env=non-prod
+    
+    # Get console URL for prod environment
+    ${SCRIPT_NAME} --operation=get-console-url --env=prod
+    
+    # Uninstall from non-prod environment
+    ${SCRIPT_NAME} --operation=uninstall --env=non-prod
+
+EOF
+}
+
+# Function to validate arguments
+validate_arguments() {
+    log_step "Validating arguments..."
+    
+    # Validate environment
+    case "$ENV" in
+        prod|non-prod)
+            log_success "Environment '$ENV' is valid"
+            ;;
+        *)
+            log_error "Invalid environment: '$ENV'. Must be 'prod' or 'non-prod'"
+            return 1
+            ;;
+    esac
+    
+    # Validate operation
+    case "$OPERATION" in
+        install|uninstall|get-console-url)
+            log_success "Operation '$OPERATION' is valid"
+            ;;
+        *)
+            log_error "Invalid operation: '$OPERATION'. Must be one of: install, uninstall, get-console-url"
+            return 1
+            ;;
+    esac
+    
+    # Validate version format if provided
+    if [[ -n "$SHO_VERSION" && "$SHO_VERSION" != "latest" ]]; then
+        if [[ ! "$SHO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            log_error "Invalid version format: '$SHO_VERSION'. Expected format: x.y.z (e.g., 0.2.3)"
+            return 1
+        fi
+        log_success "Version '$SHO_VERSION' format is valid"
+    fi
+    
+    # Validate ACR configuration if enabled
+    if [[ "$USE_ACR" == "true" ]]; then
+        if [[ "$OPERATION" != "install" ]]; then
+            log_error "--use-acr flag is only applicable for install operation"
+            return 1
+        fi
+        
+        log_step "Validating ACR configuration..."
+        local missing_vars=()
+        
+        if [[ -z "${SP_ID}" ]]; then
+            missing_vars+=("SP_ID")
+        fi
+        
+        if [[ -z "${SP_SECRET}" ]]; then
+            missing_vars+=("SP_SECRET")
+        fi
+        
+        if [[ -z "${SH_REGISTRY}" ]]; then
+            missing_vars+=("SH_REGISTRY")
+        fi
+        
+        if [[ ${#missing_vars[@]} -gt 0 ]]; then
+            log_error "Missing required environment variables for ACR: ${missing_vars[*]}"
+            log_info "Please set the following environment variables:"
+            for var in "${missing_vars[@]}"; do
+                log_info "  export $var=<value>"
+            done
+            return 1
+        fi
+        
+        log_success "ACR configuration is valid"
+    fi
+    
+    return 0
+}
+
+# Function to parse command line arguments
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --version=*)
+                SHO_VERSION="${1#*=}"
+                log_info "Version specified: $SHO_VERSION"
+                ;;
+            --env=*)
+                ENV="${1#*=}"
+                log_info "Environment specified: $ENV"
+                ;;
+            --operation=*)
+                OPERATION="${1#*=}"
+                log_info "Operation specified: $OPERATION"
+                ;;
+            --use-acr=*)
+                USE_ACR="${1#*=}"
+                # Normalize boolean values
+                case "$(echo "${USE_ACR}" | tr '[:upper:]' '[:lower:]')" in
+                    true|1|yes|on)
+                        USE_ACR="true"
+                        log_info "ACR registry mode enabled"
+                        ;;
+                    false|0|no|off)
+                        USE_ACR="false"
+                        ;;
+                    *)
+                        log_error "Invalid value for --use-acr: '$USE_ACR'. Must be true or false"
+                        exit 1
+                        ;;
+                esac
+                ;;
+            --use-acr)
+                # Support flag without value (defaults to true for backward compatibility)
+                USE_ACR="true"
+                log_info "ACR registry mode enabled"
+                ;;
+            --help|-h)
+                show_usage
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                echo
+                show_usage
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
+
+# Function to setup environment-specific configuration
+setup_environment() {
+    log_step "Setting up environment configuration for: $ENV"
+    
+    if [[ "$ENV" == "non-prod" ]]; then
+        ECR_ALIAS="$ECR_ALIAS_NON_PROD"
+        log_info "Using non-production ECR alias: $ECR_ALIAS"
+    else
+        ECR_ALIAS="$ECR_ALIAS_PROD"
+        log_info "Using production ECR alias: $ECR_ALIAS"
+    fi
+    
+    # Set repository URLs
+    CHART_REPOSITORY="${ECR_ALIAS}/lab/helm/self-hosted-operator"
+    IMAGE_REGISTRY="${ECR_ALIAS}/lab"
+    IMAGE_REPOSITORY="${ECR_ALIAS}/lab/$IMAGE_NAME"
+    log_info "Using ECR repository: $PUB_REGISTRY/$CHART_REPOSITORY"
+    
+    log_success "Environment setup completed"
+}
+
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Function to install package using Homebrew
+install_package_homebrew() {
+    local package="$1"
+    
+    log_step "Installing $package via Homebrew..."
+    
+    if ! command_exists brew; then
+        log_error "Homebrew not found. Please install Homebrew first: https://brew.sh"
+        return 1
+    fi
+    
+    brew install "$package"
+}
+
+# Function to install kubectl
+install_kubectl() {
+    log_step "Installing kubectl..."
+    
+    if command_exists brew; then
+        log_info "Installing kubectl via Homebrew..."
+        brew install kubectl
+    else
+        log_info "Installing kubectl via direct download..."
+        # Get the latest stable version
+        local version
+        version=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+        
+        if [[ -z "$version" ]]; then
+            log_error "Failed to get kubectl version"
+            return 1
+        fi
+        
+        log_info "Downloading kubectl $version..."
+        curl -LO "https://dl.k8s.io/release/$version/bin/darwin/amd64/kubectl"
+        chmod +x kubectl
+        
+        # Try to move to system PATH
+        if sudo mv kubectl /usr/local/bin/ 2>/dev/null; then
+            log_success "kubectl installed to /usr/local/bin/"
+        elif mkdir -p ~/bin && mv kubectl ~/bin/ && export PATH="$HOME/bin:$PATH"; then
+            log_success "kubectl installed to ~/bin/"
+            log_info "Added ~/bin to PATH for this session"
+            log_info "Add 'export PATH=\"\$HOME/bin:\$PATH\"' to your shell profile for permanent access"
+        else
+            log_error "Failed to install kubectl to system PATH"
+            return 1
+        fi
+    fi
+    
+    # Verify installation
+    if command_exists kubectl; then
+        log_success "kubectl installed successfully"
+        return 0
+    else
+        log_error "kubectl installation failed"
+        return 1
+    fi
+}
+
+# Function to install Helm
+install_helm() {
+    log_step "Installing Helm..."
+    
+    if command_exists brew; then
+        log_info "Installing Helm via Homebrew..."
+        brew install helm
+    else
+        log_info "Installing Helm via official script..."
+        # Use official Helm installation script
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm -f get_helm.sh
+    fi
+    
+    if command_exists helm; then
+        log_success "Helm installed successfully"
+        helm version --short
+        return 0
+    else
+        log_error "Helm installation failed"
+        return 1
+    fi
+}
+
+# Function to check dependencies
+check_dependencies() {
+    log_step "Checking dependencies for macOS..."
+    local all_deps_ok=true
+    
+    # Check if Homebrew is available
+    if command_exists brew; then
+        log_success "Homebrew is available"
+    else
+        log_warning "Homebrew not found. Some installations may fall back to manual methods."
+        log_info "For best experience, install Homebrew from: https://brew.sh"
+    fi
+    
+    # Check jq
+    if ! command_exists jq; then
+        log_warning "jq not found. Installing..."
+        if ! install_package_homebrew jq; then
+            all_deps_ok=false
+        fi
+    else
+        log_success "jq is installed"
+    fi
+    
+    # Check curl (usually pre-installed on macOS)
+    if ! command_exists curl; then
+        log_warning "curl not found. Installing..."
+        if ! install_package_homebrew curl; then
+            all_deps_ok=false
+        fi
+    else
+        log_success "curl is installed"
+    fi
+    
+    # Check kubectl
+    if ! command_exists kubectl; then
+        log_warning "kubectl not found. Installing..."
+        if ! install_kubectl; then
+            all_deps_ok=false
+        fi
+    else
+        log_success "kubectl is installed"
+    fi
+    
+    # Check Helm
+    if ! command_exists helm; then
+        log_warning "Helm not found. Installing..."
+        if ! install_helm; then
+            all_deps_ok=false
+        fi
+    else
+        log_success "Helm is installed"
+        helm version --short
+    fi
+    
+    # Check Kubernetes connectivity
+    log_step "Checking Kubernetes cluster connectivity..."
+    if helm list --all-namespaces >/dev/null 2>&1; then
+        log_success "Connected to Kubernetes cluster"
+    else
+        log_error "Cannot connect to Kubernetes cluster"
+        log_info "Make sure you have a valid kubeconfig and cluster access"
+        all_deps_ok=false
+    fi
+    
+    if [[ "$all_deps_ok" == true ]]; then
+        log_success "All dependencies are satisfied"
+        return 0
+    else
+        log_error "Some dependencies are missing or failed to install"
+        return 1
+    fi
+}
+
+# Function to get latest SHO version
+get_latest_sho_version() {
+    log_step "Fetching latest SHO version..."
+    
+    local token_response
+    token_response=$(curl -sL "https://${PUB_REGISTRY}/token?scope=repository:${IMAGE_REPOSITORY}:pull" 2>/dev/null)
+    
+    if [[ $? -ne 0 || -z "$token_response" ]]; then
+        log_error "Failed to get token from ECR public API"
+        return 1
+    fi
+    
+    local token
+    token=$(echo "$token_response" | jq -r '.token' 2>/dev/null)
+    
+    if [[ -z "$token" || "$token" == "null" ]]; then
+        log_error "Failed to extract token from ECR response"
+        return 1
+    fi
+    
+    local tags_response
+    tags_response=$(curl -s -H "Authorization: Bearer $token" \
+        "https://${PUB_REGISTRY}/v2/${IMAGE_REPOSITORY}/tags/list" 2>/dev/null)
+    
+    if [[ $? -ne 0 || -z "$tags_response" ]]; then
+        log_error "Failed to fetch tags from ECR repository"
+        return 1
+    fi
+    
+    local tags
+    tags=$(echo "$tags_response" | jq -r '.tags[]' 2>/dev/null)
+    
+    if [[ -z "$tags" ]]; then
+        log_error "No tags found in ECR repository response"
+        return 1
+    fi
+    
+    local latest_image_version
+    latest_image_version=$(echo "$tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+    
+    if [[ -z "$latest_image_version" ]]; then
+        log_error "Failed to find a valid image version from tags"
+        log_info "Available image version tags: $tags"
+        return 1
+    fi
+    
+    SHO_VERSION="${latest_image_version#v}"
+    log_success "Latest version found: $SHO_VERSION"
+    return 0
+}
+
+# Function to install SHO
+sho_install() {
+    log_step "Installing OutSystems Self-Hosted Operator..."
+    
+    # Get version if not specified
+    if [[ -z "$SHO_VERSION" || "$SHO_VERSION" == "latest" ]]; then
+        if ! get_latest_sho_version; then
+            log_error "Failed to fetch latest SHO version"
+            return 1
+        fi
+    fi
+    
+    log_info "Installing SHO version: $SHO_VERSION"
+    log_info "Environment: $ENV"
+    log_info "Namespace: $NAMESPACE"
+    
+    # Enable OCI mode for Helm
+    export HELM_EXPERIMENTAL_OCI=1
+    
+    # Pull chart to temp directory
+    local chart_oci="oci://${PUB_REGISTRY}/${CHART_REPOSITORY}"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "${tmpdir}"' EXIT
+    
+    log_step "Pulling chart from: $chart_oci"
+    if ! helm pull "${chart_oci}" --version "${SHO_VERSION}" -d "${tmpdir}"; then
+        log_error "Failed to pull Helm chart"
+        return 1
+    fi
+    
+    # Find chart file
+    local chart_file="${tmpdir}/${CHART_NAME}-${SHO_VERSION}.tgz"
+    if [[ ! -f "$chart_file" ]]; then
+        chart_file="$(find "${tmpdir}" -maxdepth 1 -type f -name '*.tgz' | head -n1)"
+    fi
+    
+    if [[ -z "$chart_file" || ! -f "$chart_file" ]]; then
+        log_error "Could not find pulled chart package in ${tmpdir}"
+        return 1
+    fi
+    
+    log_success "Chart package ready: $chart_file"
+    
+    # Install/upgrade chart
+    log_step "Installing/upgrading SHO in namespace $NAMESPACE..."
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+    local install_output
+    if [[ "$USE_ACR" == "true" ]]; then
+        log_info "Installing with ACR registry configuration"
+        install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
+            --namespace "$NAMESPACE" \
+            --create-namespace \
+            --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
+            --set "image.repository=${IMAGE_NAME}" \
+            --set "image.tag=v${SHO_VERSION}" \
+            --set-string "podAnnotations.timestamp=$timestamp" \
+            --set "registry.url=${SH_REGISTRY}" \
+            --set "registry.username=${SP_ID}" \
+            --set "registry.password=${SP_SECRET}" \
+            --set "enableECR.enabled=false" 2>&1)
+    else
+        install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
+            --namespace "$NAMESPACE" \
+            --create-namespace \
+            --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
+            --set "image.repository=${IMAGE_NAME}" \
+            --set "image.tag=v${SHO_VERSION}" \
+            --set-string "podAnnotations.timestamp=$timestamp" 2>&1)
+    fi
+    
+    if [[ $? -eq 0 ]]; then
+        log_success "OutSystems Self-Hosted Operator installed successfully!"
+        log_info "Installation details:"
+        echo "$install_output"
+        
+        # Wait for pods to be ready
+        if wait_for_pods_ready; then
+            log_success "SHO is running successfully!"
+            create_load_balancer
+        else
+            log_warning "Installation completed but pods are not ready yet"
+            show_troubleshooting_commands
+        fi
+        
+        return 0
+    else
+        log_error "Failed to install SHO"
+        log_info "Error details:"
+        echo "$install_output"
+        return 1
+    fi
+}
+
+# Function to wait for pods to be ready
+wait_for_pods_ready() {
+    log_step "Waiting for SHO pods to be ready..."
+    
+    local max_wait=300  # 5 minutes
+    local check_interval=10
+    local elapsed=0
+    
+    while [[ $elapsed -lt $max_wait ]]; do
+        local pod_info
+        pod_info=$(kubectl get pods -n "$NAMESPACE" -l "app.kubernetes.io/instance=$CHART_NAME" \
+            -o custom-columns="NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready" \
+            --no-headers 2>/dev/null)
+        
+        if [[ -n "$pod_info" ]]; then
+            local running_pods
+            running_pods=$(echo "$pod_info" | grep "Running" | grep "true" | wc -l)
+            local total_pods
+            total_pods=$(echo "$pod_info" | wc -l)
+            
+            if [[ $running_pods -gt 0 && $running_pods -eq $total_pods ]]; then
+                log_success "All SHO pods are running and ready!"
+                return 0
+            elif echo "$pod_info" | grep -q "Error\|CrashLoopBackOff\|ImagePullBackOff"; then
+                log_error "Pod(s) in error state detected!"
+                kubectl describe pods -n "$NAMESPACE" -l "app.kubernetes.io/instance=$CHART_NAME"
+                return 1
+            else
+                log_info "Pods still starting... ($running_pods/$total_pods ready) - waiting ${check_interval}s..."
+            fi
+        else
+            log_info "No pods found yet... (${elapsed}s elapsed)"
+        fi
+        
+        sleep $check_interval
+        elapsed=$((elapsed + check_interval))
+    done
+    
+    log_warning "Timeout reached while waiting for pods to be ready"
+    return 1
+}
+
+# Function to create LoadBalancer service
+create_load_balancer() {
+    log_step "Creating LoadBalancer service..."
+    
+    local service_name="$CHART_NAME"
+    local route_name="${CHART_NAME}-public"
+    local port=5050
+    
+    if ! kubectl get svc "$service_name" -n "$NAMESPACE" >/dev/null 2>&1; then
+        log_error "Service $service_name does not exist in namespace $NAMESPACE"
+        return 1
+    fi
+    
+    if ! kubectl get svc "$route_name" -n "$NAMESPACE" >/dev/null 2>&1; then
+        log_info "Creating LoadBalancer service..."
+        kubectl expose svc "$service_name" --name="$route_name" --type=LoadBalancer \
+            --port="$port" --target-port="$port" -n "$NAMESPACE"
+    else
+        log_info "LoadBalancer service already exists"
+    fi
+    
+    # Wait for LoadBalancer to get external IP
+    log_step "Waiting for LoadBalancer to become ready..."
+    local attempts=0
+    local max_attempts=30
+    
+    while [[ $attempts -lt $max_attempts ]]; do
+        local route_url
+        route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+        
+        if [[ -z "$route_url" ]]; then
+            route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
+                -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+        fi
+        
+        if [[ -n "$route_url" ]]; then
+            local full_url="http://${route_url}:${port}"
+            log_success "LoadBalancer is ready!"
+            log_success "SHO Console URL: $full_url"
+            
+            # Test URL accessibility
+            if test_url_accessible "$full_url"; then
+                log_success "SHO console is responding!"
+                open_browser "$full_url"
+            else
+                log_warning "SHO console is not yet responding"
+                log_info "Please wait a few minutes and access: $full_url"
+            fi
+            
+            return 0
+        fi
+        
+        log_info "LoadBalancer not ready yet. Attempt $((attempts + 1))/$max_attempts - waiting 10s..."
+        sleep 10
+        attempts=$((attempts + 1))
+    done
+    
+    log_error "LoadBalancer creation timed out"
+    return 1
+}
+
+# Function to test URL accessibility
+test_url_accessible() {
+    local url="$1"
+    local max_tries=5
+    local try=1
+    
+    while [[ $try -le $max_tries ]]; do
+        if curl -s -f --connect-timeout 10 --max-time 10 --head "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        try=$((try + 1))
+        sleep 5
+    done
+    return 1
+}
+
+# Function to open browser (macOS)
+open_browser() {
+    local url="$1"
+    
+    if command_exists open; then
+        open "$url"
+        log_success "Browser opened"
+    else
+        log_info "Please open the URL manually: $url"
+    fi
+}
+
+# Function to uninstall SHO
+sho_uninstall() {
+    log_step "Uninstalling OutSystems Self-Hosted Operator..."
+    
+    local route_name="${CHART_NAME}-public"
+    
+    echo
+    log_warning "WARNING: You are about to uninstall OutSystems Self-Hosted Operator"
+    log_info "This will remove the Helm release and LoadBalancer service"
+    log_info "Release: $CHART_NAME"
+    log_info "Namespace: $NAMESPACE"
+    echo
+    read -p "Are you sure you want to proceed? (yes/no): " -r confirm
+    
+    if [[ "$confirm" != "yes" ]]; then
+        log_info "Uninstallation cancelled"
+        return 0
+    fi
+    
+    # Check if release exists
+    if ! helm status "$CHART_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+        log_error "Release $CHART_NAME not found in namespace $NAMESPACE"
+        return 1
+    fi
+    
+    # Remove LoadBalancer service
+    if kubectl get svc "$route_name" -n "$NAMESPACE" >/dev/null 2>&1; then
+        log_step "Removing LoadBalancer service..."
+        kubectl delete svc "$route_name" -n "$NAMESPACE"
+    fi
+    
+    # Clean up resources
+    log_step "Cleaning up resources..."
+    kubectl get selfhostedruntimes -o name 2>/dev/null | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
+    kubectl get selfhostedvaultoperators -o name 2>/dev/null | xargs -I{} kubectl patch {} --type merge -p '{"metadata":{"finalizers":null}}' || true
+    kubectl delete selfhostedruntime --ignore-not-found self-hosted-runtime || true
+    
+    # Uninstall Helm release
+    log_step "Uninstalling Helm release..."
+    if helm uninstall "$CHART_NAME" -n "$NAMESPACE"; then
+        log_success "SHO release uninstalled successfully"
+        
+        # Optional: Delete namespace
+        read -p "Do you want to delete the namespace '$NAMESPACE'? (yes/no): " -r delete_ns
+        if [[ "$delete_ns" == "yes" ]]; then
+            kubectl delete namespace "$NAMESPACE" --wait=false || true
+            log_info "Namespace deletion initiated"
+        fi
+        
+        log_success "OutSystems Self-Hosted Operator uninstalled successfully!"
+        return 0
+    else
+        log_error "Failed to uninstall SHO release"
+        return 1
+    fi
+}
+
+# Function to get console URL
+get_console_url() {
+    log_step "Getting console URL for OutSystems Self-Hosted Operator..."
+    
+    # Check if SHO is installed
+    if ! helm status "$CHART_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+        log_error "OutSystems Self-Hosted Operator is not installed"
+        log_info "Please install it first using: $SCRIPT_NAME --operation=install"
+        return 1
+    fi
+    
+    local route_name="${CHART_NAME}-public"
+    local port=5050
+    
+    # Check if LoadBalancer service exists
+    if ! kubectl get svc "$route_name" -n "$NAMESPACE" >/dev/null 2>&1; then
+        log_warning "LoadBalancer service not found. Creating it..."
+        create_load_balancer
+        return $?
+    fi
+    
+    # Get LoadBalancer URL
+    local route_url
+    route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+    
+    if [[ -z "$route_url" ]]; then
+        route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+    fi
+    
+    if [[ -n "$route_url" ]]; then
+        local full_url="http://${route_url}:${port}"
+        log_success "Console URL: $full_url"
+        
+        if test_url_accessible "$full_url"; then
+            log_success "Console is responding!"
+            open_browser "$full_url"
+        else
+            log_warning "Console is not yet responding"
+            log_info "Please wait a few minutes and try again"
+        fi
+        
+        return 0
+    else
+        log_error "LoadBalancer URL not found"
+        log_info "LoadBalancer might still be provisioning. Please wait and try again."
+        return 1
+    fi
+}
+
+# Function to show troubleshooting commands
+show_troubleshooting_commands() {
+    cat << EOF
+
+🛠️  Troubleshooting Commands:
+
+📊 Check pod status:
+   kubectl get pods -n $NAMESPACE -l app.kubernetes.io/instance=$CHART_NAME
+
+📋 Describe pods:
+   kubectl describe pods -n $NAMESPACE -l app.kubernetes.io/instance=$CHART_NAME
+
+📝 View pod logs:
+   kubectl logs -n $NAMESPACE -l app.kubernetes.io/instance=$CHART_NAME --tail=50
+
+📋 Check events:
+   kubectl get events -n $NAMESPACE --sort-by=.metadata.creationTimestamp
+
+⚡ Check helm status:
+   helm status $CHART_NAME -n $NAMESPACE
+
+🔄 Restart deployment:
+   kubectl rollout restart deployment -n $NAMESPACE -l app.kubernetes.io/instance=$CHART_NAME
+
+EOF
+}
+
+# Function to show configuration summary
+show_configuration() {
+    cat << EOF
+
+=== Configuration Summary ===
+Script Version: $SCRIPT_VERSION
+Platform:       macOS
+Operation:      $OPERATION
+Environment:    $ENV
+Version:        ${SHO_VERSION:-latest}
+Use ACR:        $USE_ACR
+Namespace:      $NAMESPACE
+Chart Name:     $CHART_NAME
+Repository:     $PUB_REGISTRY/$CHART_REPOSITORY
+Image Registry: $PUB_REGISTRY/$IMAGE_REGISTRY
+
+EOF
+}
+
+# Main function
+main() {
+    echo "🍎 OutSystems Self-Hosted Operator macOS Installer v${SCRIPT_VERSION}"
+    echo
+    
+    # Parse command line arguments
+    parse_arguments "$@"
+    
+    # Validate arguments
+    if ! validate_arguments; then
+        exit 1
+    fi
+    
+    # Setup environment
+    setup_environment
+    
+    # Show configuration
+    show_configuration
+    
+    # Check dependencies
+    if ! check_dependencies; then
+        log_error "Dependency check failed. Please resolve issues and try again."
+        exit 1
+    fi
+    
+    # Execute operation
+    case "$OPERATION" in
+        install)
+            sho_install
+            ;;
+        uninstall)
+            sho_uninstall
+            ;;
+        get-console-url)
+            get_console_url
+            ;;
+        *)
+            log_error "Unknown operation: $OPERATION"
+            exit 1
+            ;;
+    esac
+    
+    local exit_code=$?
+    
+    if [[ $exit_code -eq 0 ]]; then
+        log_success "Operation '$OPERATION' completed successfully!"
+    else
+        log_error "Operation '$OPERATION' failed with exit code $exit_code"
+    fi
+    
+    exit $exit_code
+}
+
+# Run main function if script is executed directly or piped to shell
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]] || [[ -z "${BASH_SOURCE[0]}" ]] || [[ "${BASH_SOURCE[0]}" == "-" ]]; then
+    main "$@"
+fi

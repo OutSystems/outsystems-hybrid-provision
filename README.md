@@ -4,9 +4,9 @@ Self hosted version of ODC
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [Keyfeatures](#keyfeatures)
-3. [Usage](#usage)
-4. [Installation](#installation)
+2. [Key Features](#key-features)
+3. [System Requirements](#system-requirements)
+4. [Usage](#usage)
 
 
 ## Overview
@@ -22,7 +22,7 @@ It supports both Openshift and Kubernetes. However, the build and deploy of the 
 Before you can use ODC Studio, download it from the ODC Portal and login to your Outsystems tenant.
 
 
-## Keyfeatures
+## Key Features
 
     Hybrid Deployment Model
 
@@ -41,24 +41,103 @@ Before you can use ODC Studio, download it from the ODC Portal and login to your
         Reusable components and custom code support
 
 
+## System Requirements
+
 For the setup of the self-hosted operator, the cluster must meet the following requirements:
 
 1. At least 3 worker nodes
 2. Minimum of 4 CPU Cores per worker node
 3. Minimum of 4 GB RAM per worker node
 4. OpenShift version >= 4.15.9* or Kubernetes* >= 1.28
-5. Internet connectivity (or whitelist Outsystems domains)
-
+5. Internet connectivity (or whitelist OutSystems domains)
 
 ## Usage
 
-Before the installation of the setup, login to the web tenant and select the Self-Hosted Setup command based on the operating system. The command verifies and setup helm, kubectl, self-hosted operator. The command also checks and setups the load balancer for exposing the self-hosted operator service.
+The OutSystems Self-Hosted Operator installer provides platform-specific scripts for Linux, macOS, and Windows to automatically install, manage, and configure the self-hosted operator on Kubernetes clusters.
 
-The setup also serves the uninstallation of the product.
+### Platform-Specific Scripts
 
+- **Linux**: `scripts/linux-installer.sh`
+- **macOS**: `scripts/macos-installer.sh`  
+- **Windows**: `scripts/windows-installer.ps1`
 
-## Installation
+### Basic Installation Commands
 
+**Linux/macOS:**
+```bash
+# Run locally
+./scripts/linux-installer.sh --operation=install
+```
 
-Before proceeding with the setup of self-hosted ODC product, generate the credentials from the tenant URL to login, access the self-hosted setup and select the OS from where the product is initialized.
+**Windows PowerShell:**
+```powershell
+# Run locally
+.\scripts\windows-installer.ps1 --operation=install
+```
 
+### Command-Line Options
+
+#### Linux/macOS Options
+```bash
+--version=VERSION        # SHO version to install/manage (default: latest)
+--env=ENVIRONMENT       # Environment: prod, non-prod (default: prod)
+--operation=OPERATION   # Operation: install, uninstall, get-console-url (default: install)
+--help, -h              # Show help message
+```
+
+#### Windows PowerShell Options
+```powershell
+--version=VERSION        # SHO version to install/manage (default: latest)
+--env=ENVIRONMENT       # Environment: prod, non-prod (default: prod)
+--operation=OPERATION   # Operation: install, uninstall, get-console-url (default: install)
+--help, -h              # Show help message
+```
+
+### Usage Examples
+
+#### Install Latest Version
+```bash
+# Linux/macOS
+./scripts/linux-installer.sh
+./scripts/macos-installer.sh
+
+# Windows
+.\scripts\windows-installer.ps1
+```
+
+#### Install Specific Version
+```bash
+# Linux/macOS
+./scripts/linux-installer.sh --operation=install --version=0.2.3
+
+# Windows
+.\scripts\windows-installer.ps1 --operation=install --version=0.2.3 --env=non-prod 
+```
+
+#### Get Console URL
+```bash
+# Linux/macOS
+./scripts/linux-installer.sh --operation=get-console-url
+
+# Windows
+.\scripts\windows-installer.ps1 --operation=get-console-url --env=prod
+```
+
+#### Uninstall SHO
+```bash
+# Linux/macOS
+./scripts/linux-installer.sh --operation=uninstall
+
+# Windows
+.\scripts\windows-installer.ps1 --operation=uninstall --env=prod
+```
+
+### Getting Started
+
+Once installation is complete:
+
+1. Access the SHO console via the provided URL (typically `http://<load-balancer-ip>:5050`)
+2. Log in to your OutSystems tenant
+3. Navigate to the Self-Hosted Setup section
+4. Follow the tenant-specific configuration instructions
+5. Begin deploying applications to your self-hosted environment
