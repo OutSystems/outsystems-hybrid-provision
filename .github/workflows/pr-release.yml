@@ -18,27 +18,33 @@ jobs:
 
       - name: Prepare preview content in /tmp (read-only)
         run: |
-          STAGING_DIR="/tmp/preview"
+          STAGING_DIR="/tmp/preview/non-prod"
           mkdir -p "$STAGING_DIR"
           INDEX_FILE="$STAGING_DIR/index.html"
 
           echo '<!DOCTYPE html>
           <html><head><meta charset="utf-8"><title>Non-Prod Scripts</title></head><body><ul>' > "$INDEX_FILE"
 
-          for os in $(ls scripts); do
-            for file in scripts/$os/*; do
+          for file in scripts/*; do
+            if [ -f "$file" ]; then
               filename="${file##*/}"
-              ext="${file##*.}"
-              base="${filename%.*}"
-              release_file="${os}-${base}.${ext}"
-              # Copy to staging and replace PUB_IMAGE_REPO line safely
-              cp "$file" "$STAGING_DIR/$release_file"
+              # Copy to staging
+              cp "$file" "$STAGING_DIR/$filename"
 
-              echo "<li><a href=\"./$release_file\">$os - $release_file</a></li>" >> "$INDEX_FILE"
-            done
+              echo "<li><a href=\"./$filename\">$filename</a></li>" >> "$INDEX_FILE"
+            fi
           done
 
           echo '</ul></body></html>' >> "$INDEX_FILE"
+
+          # root-level index.html with a link to non-prod
+          echo '<!DOCTYPE html>
+          <html><head><meta charset="utf-8"><title>Script Index</title></head><body>
+          <h1>Available Environments</h1>
+          <ul>
+            <li><a href="./non-prod/index.html">Non-Prod</a></li>
+          </ul>
+          </body></html>' > /tmp/preview/index.html
 
       - name: Switch to preview branch and push content
         run: |
@@ -54,6 +60,10 @@ jobs:
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           cp -r "$STAGING_DIR"/* .
 
+          # Add a dummy change to force commit (timestamp)
+          echo "Updated at $(date --utc +'%Y-%m-%dT%H:%M:%SZ')" > .last_update
+
           git add .
-          git commit -m "Update non-prod preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
+          git commit -m "🔁 Update non-prod preview for PR #${{ github.event.pull_request.number }} at $(date --utc +'%Y-%m-%dT%H:%M:%SZ')"
           git push origin HEAD:non-prod-preview
+          
