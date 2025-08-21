@@ -32,6 +32,7 @@ USE_ACR="$DEFAULT_USE_ACR"
 ECR_ALIAS=""
 CHART_REPOSITORY=""
 IMAGE_REGISTRY=""
+IMAGE_REPOSITORY=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -539,10 +540,11 @@ sho_install() {
         # Wait for pods to be ready
         if wait_for_pods_ready; then
             log_success "SHO is running successfully!"
-            create_load_balancer
+            start_port_forwarding
         else
             log_warning "Installation completed but pods are not ready yet"
             show_troubleshooting_commands
+            return 2  # Return special code to indicate warning
         fi
         
         return 0
@@ -558,6 +560,13 @@ sho_install() {
 wait_for_pods_ready() {
     log_step "Waiting for SHO pods to be ready..."
     
+    # Disable debug output for this function to prevent variable assignments from being displayed
+    local previous_debug_state
+    if [[ $- == *x* ]]; then
+        previous_debug_state="x"
+        set +x
+    fi
+    
     local max_wait=300  # 5 minutes
     local check_interval=10
     local elapsed=0
@@ -570,16 +579,20 @@ wait_for_pods_ready() {
         
         if [[ -n "$pod_info" ]]; then
             local running_pods
-            running_pods=$(echo "$pod_info" | grep "Running" | grep "true" | wc -l)
+            running_pods=$(echo "$pod_info" | grep "Running" | grep "true" | wc -l | tr -d ' ')
             local total_pods
-            total_pods=$(echo "$pod_info" | wc -l)
+            total_pods=$(echo "$pod_info" | wc -l | tr -d ' ')
             
             if [[ $running_pods -gt 0 && $running_pods -eq $total_pods ]]; then
                 log_success "All SHO pods are running and ready!"
+                # Restore debug state if it was enabled
+                [[ "$previous_debug_state" == "x" ]] && set -x
                 return 0
             elif echo "$pod_info" | grep -q "Error\|CrashLoopBackOff\|ImagePullBackOff"; then
                 log_error "Pod(s) in error state detected!"
                 kubectl describe pods -n "$NAMESPACE" -l "app.kubernetes.io/instance=$CHART_NAME"
+                # Restore debug state if it was enabled
+                [[ "$previous_debug_state" == "x" ]] && set -x
                 return 1
             else
                 log_info "Pods still starting... ($running_pods/$total_pods ready) - waiting ${check_interval}s..."
@@ -593,69 +606,77 @@ wait_for_pods_ready() {
     done
     
     log_warning "Timeout reached while waiting for pods to be ready"
+    # Restore debug state if it was enabled
+    [[ "$previous_debug_state" == "x" ]] && set -x
     return 1
 }
 
-# Function to create LoadBalancer service
-create_load_balancer() {
-    log_step "Creating LoadBalancer service..."
+# Function to start port forwarding
+start_port_forwarding() {
+    log_step "Setting up port forwarding..."
     
     local service_name="$CHART_NAME"
-    local route_name="${CHART_NAME}-public"
-    local port=5050
+    local local_port=5050
+    local service_port=5050
     
     if ! kubectl get svc "$service_name" -n "$NAMESPACE" >/dev/null 2>&1; then
         log_error "Service $service_name does not exist in namespace $NAMESPACE"
         return 1
     fi
     
-    if ! kubectl get svc "$route_name" -n "$NAMESPACE" >/dev/null 2>&1; then
-        log_info "Creating LoadBalancer service..."
-        kubectl expose svc "$service_name" --name="$route_name" --type=LoadBalancer \
-            --port="$port" --target-port="$port" -n "$NAMESPACE"
-    else
-        log_info "LoadBalancer service already exists"
+    # Kill any existing port forwarding on the same port
+    log_info "Checking for existing port forwarding on port $local_port..."
+    local existing_pids
+    existing_pids=$(pgrep -f "kubectl.*port-forward.*:$local_port" 2>/dev/null || true)
+    
+    if [[ -n "$existing_pids" ]]; then
+        log_info "Stopping existing port forwarding process(es)..."
+        echo "$existing_pids" | xargs kill 2>/dev/null || true
+        sleep 2
     fi
     
-    # Wait for LoadBalancer to get external IP
-    log_step "Waiting for LoadBalancer to become ready..."
-    local attempts=0
-    local max_attempts=30
+    # Start port forwarding in background
+    log_info "Starting port forwarding: localhost:$local_port -> $service_name:$service_port"
+    kubectl port-forward -n "$NAMESPACE" svc/"$service_name" "$local_port:$service_port" >/dev/null 2>&1 &
+    local pf_pid=$!
     
-    while [[ $attempts -lt $max_attempts ]]; do
-        local route_url
-        route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
-        
-        if [[ -z "$route_url" ]]; then
-            route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
-                -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
-        fi
-        
-        if [[ -n "$route_url" ]]; then
-            local full_url="http://${route_url}:${port}"
-            log_success "LoadBalancer is ready!"
-            log_success "SHO Console URL: $full_url"
-            
-            # Test URL accessibility
-            if test_url_accessible "$full_url"; then
-                log_success "SHO console is responding!"
-                open_browser "$full_url"
-            else
-                log_warning "SHO console is not yet responding"
-                log_info "Please wait a few minutes and access: $full_url"
+    # Wait a moment for port forwarding to establish
+    log_info "Waiting for port forwarding to establish..."
+    sleep 5
+    
+    local local_url="http://localhost:$local_port"
+    log_success "Port forwarding established!"
+    log_success "SHO Console URL: $local_url"
+    
+    # Test URL accessibility
+    local max_attempts=12  # 60 seconds total
+    local attempts=0
+    local accessible=false
+    
+    log_step "Testing console accessibility..."
+    while [[ $attempts -lt $max_attempts && "$accessible" == "false" ]]; do
+        if test_url_accessible "$local_url"; then
+            accessible=true
+            log_success "SHO console is responding!"
+            open_browser "$local_url"
+            log_success "Port forwarding is running in the background (PID: $pf_pid)"
+            log_info "To stop port forwarding, run: kill $pf_pid"
+        else
+            attempts=$((attempts + 1))
+            if [[ $attempts -lt $max_attempts ]]; then
+                log_info "Console not ready yet. Attempt $attempts/$max_attempts - waiting 5s..."
+                sleep 5
             fi
-            
-            return 0
         fi
-        
-        log_info "LoadBalancer not ready yet. Attempt $((attempts + 1))/$max_attempts - waiting 10s..."
-        sleep 10
-        attempts=$((attempts + 1))
     done
     
-    log_error "LoadBalancer creation timed out"
-    return 1
+    if [[ "$accessible" == "false" ]]; then
+        log_warning "SHO console is not yet responding"
+        log_info "Please wait a few minutes and access: $local_url"
+        log_info "Port forwarding is running in the background (PID: $pf_pid)"
+    fi
+    
+    return 0
 }
 
 # Function to test URL accessibility
@@ -694,7 +715,7 @@ sho_uninstall() {
     
     echo
     log_warning "WARNING: You are about to uninstall OutSystems Self-Hosted Operator"
-    log_info "This will remove the Helm release and LoadBalancer service"
+    log_info "This will remove the Helm release and stop any port forwarding"
     log_info "Release: $CHART_NAME"
     log_info "Namespace: $NAMESPACE"
     echo
@@ -711,10 +732,15 @@ sho_uninstall() {
         return 1
     fi
     
-    # Remove LoadBalancer service
-    if kubectl get svc "$route_name" -n "$NAMESPACE" >/dev/null 2>&1; then
-        log_step "Removing LoadBalancer service..."
-        kubectl delete svc "$route_name" -n "$NAMESPACE"
+    # Stop any existing port forwarding processes
+    log_step "Stopping port forwarding processes..."
+    local pf_pids
+    pf_pids=$(pgrep -f "kubectl.*port-forward" 2>/dev/null || true)
+    if [[ -n "$pf_pids" ]]; then
+        echo "$pf_pids" | xargs kill 2>/dev/null || true
+        log_info "Port forwarding processes stopped"
+    else
+        log_info "No port forwarding processes found"
     fi
     
     # Clean up resources
@@ -754,44 +780,36 @@ get_console_url() {
         return 1
     fi
     
-    local route_name="${CHART_NAME}-public"
-    local port=5050
-    
-    # Check if LoadBalancer service exists
-    if ! kubectl get svc "$route_name" -n "$NAMESPACE" >/dev/null 2>&1; then
-        log_warning "LoadBalancer service not found. Creating it..."
-        create_load_balancer
-        return $?
+    # Check if pods are running
+    local pods_status
+    pods_status=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name="$CHART_NAME" -o jsonpath='{.items[*].status.phase}' 2>/dev/null)
+    if [[ "$pods_status" != *"Running"* ]]; then
+        log_error "SHO pods are not running"
+        log_info "Please ensure the SHO installation is healthy"
+        return 1
     fi
     
-    # Get LoadBalancer URL
-    local route_url
-    route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
-    
-    if [[ -z "$route_url" ]]; then
-        route_url=$(kubectl get svc "$route_name" -n "$NAMESPACE" \
-            -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
-    fi
-    
-    if [[ -n "$route_url" ]]; then
-        local full_url="http://${route_url}:${port}"
-        log_success "Console URL: $full_url"
+    # Check if port forwarding is already running
+    local existing_pf
+    existing_pf=$(pgrep -f "kubectl.*port-forward.*:5050" 2>/dev/null || true)
+    if [[ -n "$existing_pf" ]]; then
+        log_info "Port forwarding is already active (PID: $existing_pf)"
+        local local_url="http://localhost:5050"
+        log_success "Console URL: $local_url"
         
-        if test_url_accessible "$full_url"; then
+        if test_url_accessible "$local_url"; then
             log_success "Console is responding!"
-            open_browser "$full_url"
+            open_browser "$local_url"
         else
             log_warning "Console is not yet responding"
             log_info "Please wait a few minutes and try again"
         fi
-        
         return 0
-    else
-        log_error "LoadBalancer URL not found"
-        log_info "LoadBalancer might still be provisioning. Please wait and try again."
-        return 1
     fi
+    
+    # Start new port forwarding
+    log_info "Starting port forwarding..."
+    start_port_forwarding
 }
 
 # Function to show troubleshooting commands
@@ -886,6 +904,9 @@ main() {
     
     if [[ $exit_code -eq 0 ]]; then
         log_success "Operation '$OPERATION' completed successfully!"
+    elif [[ $exit_code -eq 2 ]]; then
+        log_warning "Operation '$OPERATION' completed with warning!"
+        exit_code=0  # Still exit successfully for automation
     else
         log_error "Operation '$OPERATION' failed with exit code $exit_code"
     fi
