@@ -8,7 +8,6 @@ param(
     [string]$operation = "install",
     [ValidateSet("true", "false")]
     [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
-    [Alias("UseAcr")]
     [switch]$UseAcr,
     [Alias("h")]
     [switch]$help
@@ -36,7 +35,7 @@ $Script:PubRegistry = "public.ecr.aws"
 $Script:ShoVersion = $version
 $Script:Env = $env
 $Script:Op = $operation
-$Script:UseAcr = if ($UseAcr) { "true" } elseif ($use_acr -eq "true") { "true" } else { "false" }
+$Script:UseAcr = $UseAcr.IsPresent
 
 # Derived configuration
 $Script:EcrAlias = ""
@@ -133,7 +132,7 @@ function Test-Arguments {
     }
     
     # Validate ACR configuration if enabled
-    if ($Script:UseAcr -eq "true") {
+    if ($Script:UseAcr) {
         if ($Script:Op -ne "install") {
             Write-LogError "-UseAcr flag is only applicable for install operation"
             return $false
@@ -492,11 +491,13 @@ function Install-Sho {
     
     # Pull chart to temp directory
     $chartOci = "oci://$Script:PubRegistry/$Script:ChartRepository"
-    $tmpDir = New-TemporaryDirectory
+    $tmpDirPath = New-TemporaryDirectory
+	Write-LogInfo "Location: $tmpDirPath"
     
     try {
         Write-LogStep "Pulling chart from: $chartOci"
-        helm pull $chartOci --version $Script:ShoVersion -d $tmpDir.FullName
+        Write-LogInfo "helm pull $chartOci --version $Script:ShoVersion -d $tmpDirPath"
+		helm pull $chartOci --version $Script:ShoVersion -d $tmpDirPath
         
         if ($LASTEXITCODE -ne 0) {
             Write-LogError "Failed to pull Helm chart"
@@ -504,9 +505,9 @@ function Install-Sho {
         }
         
         # Find chart file
-        $chartFile = Get-ChildItem -Path $tmpDir.FullName -Filter "*.tgz" | Select-Object -First 1
+        $chartFile = Get-ChildItem -Path $tmpDirPath -Filter "*.tgz" | Select-Object -First 1
         if (-not $chartFile) {
-            Write-LogError "Could not find pulled chart package in $($tmpDir.FullName)"
+            Write-LogError "Could not find pulled chart package in $tmpDirPath"
             return $false
         }
         
@@ -526,7 +527,7 @@ function Install-Sho {
             "--set-string", "podAnnotations.timestamp=$timestamp"
         )
         
-        if ($Script:UseAcr -eq "true") {
+        if ($Script:UseAcr) {
             Write-LogInfo "Installing with ACR registry configuration"
             $helmArgs += @(
                 "--set", "registry.url=$env:SH_REGISTRY",
@@ -546,10 +547,11 @@ function Install-Sho {
             # Wait for pods to be ready
             if (Wait-ForPodsReady) {
                 Write-LogSuccess "SHO is running successfully!"
-                New-LoadBalancer
+                Start-PortForwarding
             } else {
                 Write-LogWarning "Installation completed but pods are not ready yet"
                 Show-TroubleshootingCommands
+                return 2  # Return special code to indicate warning
             }
             
             return $true
@@ -562,8 +564,8 @@ function Install-Sho {
         
     } finally {
         # Cleanup temp directory
-        if (Test-Path $tmpDir.FullName) {
-            Remove-Item $tmpDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $tmpDirPath) {
+            Remove-Item $tmpDirPath -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -573,8 +575,8 @@ function New-TemporaryDirectory {
     $tempPath = [System.IO.Path]::GetTempPath()
     $tempDir = [System.IO.Path]::GetRandomFileName()
     $fullPath = Join-Path $tempPath $tempDir
-    New-Item -ItemType Directory -Path $fullPath
-    return Get-Item $fullPath
+    $newDir = New-Item -ItemType Directory -Path $fullPath
+    return $newDir.FullName
 }
 
 # Function to wait for pods to be ready
@@ -620,13 +622,13 @@ function Wait-ForPodsReady {
     return $false
 }
 
-# Function to create LoadBalancer service
-function New-LoadBalancer {
-    Write-LogStep "Creating LoadBalancer service..."
+# Function to start port forwarding
+function Start-PortForwarding {
+    Write-LogStep "Setting up port forwarding..."
     
     $serviceName = $Script:ChartName
-    $routeName = "$Script:ChartName-public"
-    $port = 5050
+    $localPort = 5050
+    $servicePort = 5050
     
     try {
         # Check if source service exists
@@ -636,62 +638,66 @@ function New-LoadBalancer {
             return $false
         }
         
-        # Check if LoadBalancer service exists
-        kubectl get svc $routeName -n $Script:Namespace 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-LogInfo "Creating LoadBalancer service..."
-            kubectl expose svc $serviceName --name=$routeName --type=LoadBalancer --port=$port --target-port=$port -n $Script:Namespace
-        } else {
-            Write-LogInfo "LoadBalancer service already exists"
+        # Kill any existing port forwarding on the same port
+        Write-LogInfo "Checking for existing port forwarding on port $localPort..."
+        $existingProcess = Get-Process -Name "kubectl" -ErrorAction SilentlyContinue | Where-Object {
+            $_.CommandLine -like "*port-forward*:$localPort*"
         }
         
-        # Wait for LoadBalancer to get external IP
-        Write-LogStep "Waiting for LoadBalancer to become ready..."
-        $attempts = 0
-        $maxAttempts = 30
+        if ($existingProcess) {
+            Write-LogInfo "Stopping existing port forwarding process..."
+            $existingProcess | Stop-Process -Force
+            Start-Sleep 2
+        }
         
-        while ($attempts -lt $maxAttempts) {
-            try {
-                # Try to get hostname first, then IP
-                $routeUrl = kubectl get svc $routeName -n $Script:Namespace -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>$null
-                
-                if (-not $routeUrl) {
-                    $routeUrl = kubectl get svc $routeName -n $Script:Namespace -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null
-                }
-                
-                if ($routeUrl) {
-                    $fullUrl = "http://$routeUrl`:$port"
-                    Write-LogSuccess "LoadBalancer is ready!"
-                    Write-LogSuccess "SHO Console URL: $fullUrl"
-                    
-                    # Test URL accessibility
-                    if (Test-UrlAccessible $fullUrl) {
-                        Write-LogSuccess "SHO console is responding!"
-                        Start-Process $fullUrl
-                        Write-LogSuccess "Browser opened"
-                    } else {
-                        Write-LogWarning "SHO console is not yet responding"
-                        Write-LogInfo "Please wait a few minutes and access: $fullUrl"
-                    }
-                    
-                    return $true
-                }
-                
-                Write-LogInfo "LoadBalancer not ready yet. Attempt $(($attempts + 1))/$maxAttempts - waiting 10s..."
-                Start-Sleep 10
+        # Start port forwarding in background
+        Write-LogInfo "Starting port forwarding: localhost:$localPort -> $serviceName`:$servicePort"
+        $portForwardJob = Start-Job -ScriptBlock {
+            param($namespace, $serviceName, $localPort, $servicePort)
+            kubectl port-forward -n $namespace svc/$serviceName $localPort`:$servicePort
+        } -ArgumentList $Script:Namespace, $serviceName, $localPort, $servicePort
+        
+        # Wait a moment for port forwarding to establish
+        Write-LogInfo "Waiting for port forwarding to establish..."
+        Start-Sleep 5
+        
+        $localUrl = "http://localhost:$localPort"
+        Write-LogSuccess "Port forwarding established!"
+        Write-LogSuccess "SHO Console URL: $localUrl"
+        
+        # Test URL accessibility
+        $maxAttempts = 12  # 60 seconds total
+        $attempts = 0
+        $accessible = $false
+        
+        Write-LogStep "Testing console accessibility..."
+        while ($attempts -lt $maxAttempts -and -not $accessible) {
+            if (Test-UrlAccessible $localUrl) {
+                $accessible = $true
+                Write-LogSuccess "SHO console is responding!"
+                Start-Process $localUrl
+                Write-LogSuccess "Browser opened"
+                Write-LogInfo "Port forwarding is running in the background (Job ID: $($portForwardJob.Id))"
+                Write-LogInfo "To stop port forwarding, run: Stop-Job $($portForwardJob.Id); Remove-Job $($portForwardJob.Id)"
+            } else {
                 $attempts++
-            } catch {
-                Write-LogInfo "LoadBalancer not ready yet. Attempt $(($attempts + 1))/$maxAttempts - waiting 10s..."
-                Start-Sleep 10
-                $attempts++
+                if ($attempts -lt $maxAttempts) {
+                    Write-LogInfo "Console not ready yet. Attempt $attempts/$maxAttempts - waiting 5s..."
+                    Start-Sleep 5
+                }
             }
         }
         
-        Write-LogError "LoadBalancer creation timed out"
-        return $false
+        if (-not $accessible) {
+            Write-LogWarning "SHO console is not yet responding"
+            Write-LogInfo "Please wait a few minutes and access: $localUrl"
+            Write-LogInfo "Port forwarding is running in the background (Job ID: $($portForwardJob.Id))"
+        }
+        
+        return $true
         
     } catch {
-        Write-LogError "Failed to create LoadBalancer: $($_.Exception.Message)"
+        Write-LogError "Failed to set up port forwarding: $($_.Exception.Message)"
         return $false
     }
 }
@@ -725,7 +731,7 @@ function Uninstall-Sho {
     
     Write-Host ""
     Write-LogWarning "WARNING: You are about to uninstall OutSystems Self-Hosted Operator"
-    Write-LogInfo "This will remove the Helm release and LoadBalancer service"
+    Write-LogInfo "This will remove the Helm release and stop any port forwarding"
     Write-LogInfo "Release: $Script:ChartName"
     Write-LogInfo "Namespace: $Script:Namespace"
     Write-Host ""
@@ -744,11 +750,15 @@ function Uninstall-Sho {
         return $false
     }
     
-    # Remove LoadBalancer service
-    kubectl get svc $routeName -n $Script:Namespace 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Write-LogStep "Removing LoadBalancer service..."
-        kubectl delete svc $routeName -n $Script:Namespace
+    # Stop any existing port forwarding jobs
+    Write-LogStep "Stopping port forwarding jobs..."
+    $portForwardJobs = Get-Job | Where-Object { $_.Command -like "*kubectl port-forward*" }
+    if ($portForwardJobs) {
+        $portForwardJobs | Stop-Job
+        $portForwardJobs | Remove-Job
+        Write-LogInfo "Port forwarding jobs stopped"
+    } else {
+        Write-LogInfo "No port forwarding jobs found"
     }
     
     # Clean up resources
@@ -791,47 +801,35 @@ function Get-ConsoleUrl {
         return $false
     }
     
-    $routeName = "$Script:ChartName-public"
-    $port = 5050
-    
-    # Check if LoadBalancer service exists
-    kubectl get svc $routeName -n $Script:Namespace 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-LogWarning "LoadBalancer service not found. Creating it..."
-        return New-LoadBalancer
-    }
-    
-    # Get LoadBalancer URL
-    try {
-        $routeUrl = kubectl get svc $routeName -n $Script:Namespace -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>$null
-        
-        if (-not $routeUrl) {
-            $routeUrl = kubectl get svc $routeName -n $Script:Namespace -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null
-        }
-        
-        if ($routeUrl) {
-            $fullUrl = "http://$routeUrl`:$port"
-            Write-LogSuccess "Console URL: $fullUrl"
-            
-            if (Test-UrlAccessible $fullUrl) {
-                Write-LogSuccess "Console is responding!"
-                Start-Process $fullUrl
-                Write-LogSuccess "Browser opened"
-            } else {
-                Write-LogWarning "Console is not yet responding"
-                Write-LogInfo "Please wait a few minutes and try again"
-            }
-            
-            return $true
-        } else {
-            Write-LogError "LoadBalancer URL not found"
-            Write-LogInfo "LoadBalancer might still be provisioning. Please wait and try again."
-            return $false
-        }
-    } catch {
-        Write-LogError "Failed to get console URL: $($_.Exception.Message)"
+    # Check if pods are running
+    $pods = kubectl get pods -n $Script:Namespace -l app.kubernetes.io/name=$Script:ChartName -o jsonpath='{.items[*].status.phase}' 2>$null
+    if ($pods -notcontains "Running") {
+        Write-LogError "SHO pods are not running"
+        Write-LogInfo "Please ensure the SHO installation is healthy"
         return $false
     }
+    
+    # Check if port forwarding is already running
+    $existingJob = Get-Job | Where-Object { $_.Command -like "*kubectl port-forward*" -and $_.State -eq "Running" }
+    if ($existingJob) {
+        Write-LogInfo "Port forwarding is already active (Job ID: $($existingJob.Id))"
+        $localUrl = "http://localhost:5050"
+        Write-LogSuccess "Console URL: $localUrl"
+        
+        if (Test-UrlAccessible $localUrl) {
+            Write-LogSuccess "Console is responding!"
+            Start-Process $localUrl
+            Write-LogSuccess "Browser opened"
+        } else {
+            Write-LogWarning "Console is not yet responding"
+            Write-LogInfo "Please wait a few minutes and try again"
+        }
+        return $true
+    }
+    
+    # Start new port forwarding
+    Write-LogInfo "Starting port forwarding..."
+    return Start-PortForwarding
 }
 
 # Function to show troubleshooting commands
@@ -909,16 +907,16 @@ function Main {
     }
     
     # Execute operation
-    $success = $false
+    $result = $null
     switch ($Script:Op) {
         "install" {
-            $success = Install-Sho
+            $result = Install-Sho
         }
         "uninstall" {
-            $success = Uninstall-Sho
+            $result = Uninstall-Sho
         }
         "get-console-url" {
-            $success = Get-ConsoleUrl
+            $result = Get-ConsoleUrl
         }
         default {
             Write-LogError "Unknown operation: $Script:Op"
@@ -926,9 +924,12 @@ function Main {
         }
     }
     
-    if ($success) {
+    if ($result -eq $true) {
         Write-LogSuccess "Operation '$Script:Op' completed successfully!"
         exit 0
+    } elseif ($result -eq 2) {
+        Write-LogWarning "Operation '$Script:Op' completed with warning!"
+        exit 0  # Still exit successfully for automation
     } else {
         Write-LogError "Operation '$Script:Op' failed"
         exit 1
