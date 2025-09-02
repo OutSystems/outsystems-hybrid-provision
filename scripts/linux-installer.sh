@@ -15,7 +15,7 @@ CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
 DEFAULT_ENV="prod"
 DEFAULT_OPERATION="install"
-DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
+DEFAULT_USE_ACR="true"  # Temporary backward compatibility for Azure ACR
 
 # Environment-specific settings
 ECR_ALIAS_PROD="j0s5s8b0"    # GA ECR alias
@@ -71,7 +71,7 @@ USAGE:
     ${SCRIPT_NAME} [OPTIONS]
 
 OPTIONS:
-    --version=VERSION        SHO version to install/manage (default: latest)
+    --version=VERSION        SHO version to install/manage
     --env=ENVIRONMENT       Environment: prod, non-prod (default: prod)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
@@ -385,7 +385,7 @@ check_dependencies() {
     
     # Check Kubernetes connectivity
     log_step "Checking Kubernetes cluster connectivity..."
-    if helm list --all-namespaces >/dev/null 2>&1; then
+    if kubectl cluster-info >/dev/null 2>&1; then
         log_success "Connected to Kubernetes cluster"
     else
         log_error "Cannot connect to Kubernetes cluster"
@@ -456,14 +456,6 @@ get_latest_sho_version() {
 # Function to install SHO
 sho_install() {
     log_step "Installing OutSystems Self-Hosted Operator..."
-    
-    # Get version if not specified
-    if [[ -z "$SHO_VERSION" || "$SHO_VERSION" == "latest" ]]; then
-        if ! get_latest_sho_version; then
-            log_error "Failed to fetch latest SHO version"
-            return 1
-        fi
-    fi
     
     log_info "Installing SHO version: $SHO_VERSION"
     log_info "Environment: $ENV"
@@ -782,25 +774,7 @@ get_console_url() {
         log_info "Please ensure the SHO installation is healthy"
         return 1
     fi
-    
-    # Check if port forwarding is already running
-    local existing_pf
-    existing_pf=$(pgrep -f "kubectl.*port-forward.*:5050" 2>/dev/null || true)
-    if [[ -n "$existing_pf" ]]; then
-        log_info "Port forwarding is already active (PID: $existing_pf)"
-        local local_url="http://localhost:5050"
-        log_success "Console URL: $local_url"
-        
-        if test_url_accessible "$local_url"; then
-            log_success "Console is responding!"
-            open_browser "$local_url"
-        else
-            log_warning "Console is not yet responding"
-            log_info "Please wait a few minutes and try again"
-        fi
-        return 0
-    fi
-    
+    log_success "SHO is installed and pods are running"
     # Start new port forwarding
     log_info "Starting port forwarding..."
     start_port_forwarding
@@ -867,6 +841,14 @@ main() {
     
     # Setup environment
     setup_environment
+    
+    # Get version if not specified
+    if [[ -z "$SHO_VERSION" || "$SHO_VERSION" == "latest" ]]; then
+        if ! get_latest_sho_version; then
+            log_error "Failed to fetch latest SHO version"
+            return 1
+        fi
+    fi
     
     # Show configuration
     show_configuration

@@ -7,7 +7,7 @@ param(
     [ValidateSet("install", "uninstall", "get-console-url")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
-    [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
+    [string]$use_acr = "true",  # Temporary backward compatibility for Azure ACR
     [switch]$UseAcr,
     [Alias("h")]
     [switch]$help
@@ -87,7 +87,7 @@ USAGE:
     .\$Script:ScriptName [OPTIONS]
 
 OPTIONS:
-    --version=VERSION        SHO version to install/manage (default: latest)
+    --version=VERSION        SHO version to install/manage
     --env=ENVIRONMENT       Environment: prod, non-prod (default: prod)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
@@ -402,7 +402,7 @@ function Test-Dependencies {
     # Check Kubernetes connectivity
     Write-LogStep "Checking Kubernetes cluster connectivity..."
     try {
-        $null = helm list --all-namespaces 2>$null
+        $null = kubectl cluster-info 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-LogSuccess "Connected to Kubernetes cluster"
         } else {
@@ -807,24 +807,6 @@ function Get-ConsoleUrl {
         Write-LogError "SHO pods are not running"
         Write-LogInfo "Please ensure the SHO installation is healthy"
         return $false
-    }
-    
-    # Check if port forwarding is already running
-    $existingJob = Get-Job | Where-Object { $_.Command -like "*kubectl port-forward*" -and $_.State -eq "Running" }
-    if ($existingJob) {
-        Write-LogInfo "Port forwarding is already active (Job ID: $($existingJob.Id))"
-        $localUrl = "http://localhost:5050"
-        Write-LogSuccess "Console URL: $localUrl"
-        
-        if (Test-UrlAccessible $localUrl) {
-            Write-LogSuccess "Console is responding!"
-            Start-Process $localUrl
-            Write-LogSuccess "Browser opened"
-        } else {
-            Write-LogWarning "Console is not yet responding"
-            Write-LogInfo "Please wait a few minutes and try again"
-        }
-        return $true
     }
     
     # Start new port forwarding
