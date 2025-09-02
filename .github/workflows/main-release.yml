@@ -91,15 +91,12 @@
         - name: Prepare release assets
           run: |
             mkdir -p release-assets
-            for os in $(ls scripts); do
-              for file in scripts/$os/*; do
-                filename="${file##*/}"  # Extract filename with extension
-                filename="${filename%.*}"  # Remove the extension
-                ext="${file##*.}"
-                release_file="${os}-${filename}.${ext}"
-                echo "Preparing release file: $release_file"
-                cp "$file" "release-assets/${release_file}"
-              done
+            for file in scripts/*; do
+              if [ -f "$file" ]; then
+                filename="${file##*/}"
+                echo "Preparing release file: $filename"
+                cp "$file" "release-assets/$filename"
+              fi
             done
   
         
