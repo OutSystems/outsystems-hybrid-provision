@@ -757,10 +757,9 @@ function Uninstall-Sho {
     Write-Host ""
     
     $confirm = Read-Host "Are you sure you want to proceed? (yes/no)"
-    
-    if ($confirm -ne "yes") {
+    if ($confirm -notmatch '^(?i)y(es)?$') {
         Write-LogInfo "Uninstallation cancelled"
-        return $true
+        exit 0
     }
     
     # Check if release exists
@@ -796,7 +795,7 @@ function Uninstall-Sho {
         
         # Optional: Delete namespace
         $deleteNs = Read-Host "Do you want to delete the namespace '$Script:Namespace'? (yes/no)"
-        if ($deleteNs -eq "yes") {
+            if ($deleteNs -match '^(?i)y(es)?$') {
             kubectl delete namespace $Script:Namespace --wait=false 2>$null
             Write-LogInfo "Namespace deletion initiated"
         }
