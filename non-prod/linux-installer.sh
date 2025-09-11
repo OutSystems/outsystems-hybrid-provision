@@ -69,12 +69,9 @@ show_usage() {
     cat << EOF
 ${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for Linux
 
-USAGE:
-    ${SCRIPT_NAME} [OPTIONS]
-
 OPTIONS:
-    --version=VERSION        SHO version to install/manage
-    --env=ENVIRONMENT       Environment: prod, non-prod (default: prod)
+    --version=VERSION        SHO version to install/manage (default: latest)
+    --env=ENVIRONMENT       Environment: test, ea, ga (default: ga)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
@@ -82,21 +79,21 @@ OPTIONS:
 
 OPERATIONS:
     install                 Install OutSystems Self-Hosted Operator
-    uninstall              Uninstall OutSystems Self-Hosted Operator  
-    get-console-url        Get console URL for installed SHO
+    uninstall               Uninstall OutSystems Self-Hosted Operator  
+    get-console-url         Get console URL for installed SHO
 
 EXAMPLES:
-    # Install latest version in prod environment
+    # Install latest version in GA environment
     ${SCRIPT_NAME}
     
-    # Install specific version in non-prod environment
-    ${SCRIPT_NAME} --operation=install --version=0.2.3 --env=non-prod
+    # Install specific version in EA environment
+    ${SCRIPT_NAME} --operation=install --version=0.2.3 --env=ea
     
-    # Get console URL for prod environment
-    ${SCRIPT_NAME} --operation=get-console-url --env=prod
+    # Get console URL for test environment
+    ${SCRIPT_NAME} --operation=get-console-url --env=test
     
-    # Uninstall from non-prod environment
-    ${SCRIPT_NAME} --operation=uninstall --env=non-prod
+    # Uninstall from GA environment
+    ${SCRIPT_NAME} --operation=uninstall --env=ga
 
 EOF
 }

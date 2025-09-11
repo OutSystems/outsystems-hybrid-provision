@@ -870,13 +870,13 @@ Script Version: $Script:ScriptVersion
 Platform:       Windows
 Operation:      $Script:Op
 Environment:    $Script:Env
-    $(if ($Script:Op -eq 'install') {
-        "Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr"
-    })
 Namespace:      $Script:Namespace
 Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
 Image Registry: $Script:PubRegistry/$Script:ImageRegistry
+$(if ($Script:Op -eq 'install') {
+"Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr"
+})
 
 "@
 }
@@ -906,12 +906,12 @@ function Main {
         exit 1
     }
 
-    # For install operation, get version if not specified before showing configuration
+    # For install operation, get version if not specified
     if ($Script:Op -eq "install") {
         if (-not $Script:ShoVersion -or $Script:ShoVersion -eq "latest") {
             if (-not (Get-LatestShoVersion)) {
                 Write-LogError "Failed to fetch latest SHO version"
-                exit 1
+                return $false
             }
         }
     }
