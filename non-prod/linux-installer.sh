@@ -3,10 +3,7 @@
 set -e
 
 # Script Configuration
-SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
-if [[ -z "$SCRIPT_NAME" || "$SCRIPT_NAME" == "-" ]]; then
-    SCRIPT_NAME="linux-installer.sh"
-fi
+SCRIPT_NAME="linux-installer.sh"
 SCRIPT_VERSION="1.0.0"
 
 # Default Configuration
@@ -718,7 +715,7 @@ sho_uninstall() {
     log_info "Release: $CHART_NAME"
     log_info "Namespace: $NAMESPACE"
     echo
-    read -p "Are you sure you want to proceed? (yes/no): " -r confirm
+    read -p "Are you sure you want to proceed? (y/n): " -r confirm
     
     if [[ ! "$confirm" =~ ^(yes|y)$ ]]; then
         log_info "Uninstallation cancelled"
@@ -754,8 +751,8 @@ sho_uninstall() {
         log_success "SHO release uninstalled successfully"
         
         # Optional: Delete namespace
-        read -p "Do you want to delete the namespace '$NAMESPACE'? (yes/no): " -r delete_ns
-        if [[ "$delete_ns" == "yes" ]]; then
+        read -p "Do you want to delete the namespace '$NAMESPACE'? (y/n): " -r delete_ns
+        if [[ "$delete_ns" =~ ^(yes|y)$ ]]; then
             kubectl delete namespace "$NAMESPACE" --wait=false || true
             log_info "Namespace deletion initiated"
         fi
