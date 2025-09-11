@@ -89,33 +89,34 @@ USAGE:
     .\$Script:ScriptName [OPTIONS]
 
 OPTIONS:
-    --version=VERSION        SHO version to install/manage
-    --env=ENVIRONMENT       Environment: prod, non-prod (default: prod)
-    --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
-    --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
-                           [TEMPORARY: Backward compatibility for Azure ACR]
-    --help, -h              Show this help message
+
+    -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
+    -env ENVIRONMENT        Environment: ga, ea, test, pre-test (default: pre-test)
+    -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
+    -use-acr BOOLEAN        Use ACR registry: true, false (default: true)
+                             [TEMPORARY: Backward compatibility for Azure ACR]
+    -help, -h               Show this help message
 
 OPERATIONS:
-    install                     Install OutSystems Self-Hosted Operator
-    uninstall                  Uninstall OutSystems Self-Hosted Operator
-    get-console-url            Get console URL for installed SHO
+    install                  Install OutSystems Self-Hosted Operator
+    uninstall                Uninstall OutSystems Self-Hosted Operator
+    get-console-url          Get console URL for installed SHO
 
 EXAMPLES:
-    # Install latest version in prod environment
+    # Install latest version in pre-test environment
     .\$Script:ScriptName
 
-    # Install specific version in non-prod environment
-    .\$Script:ScriptName --operation=install --version=0.2.3 --env=non-prod
-    
+    # Install specific version in GA environment
+    .\$Script:ScriptName -operation install -version 0.2.3 -env ga
+
     # Alternative PowerShell syntax (also supported)
-    .\$Script:ScriptName -operation install -version 0.2.3 -env non-prod
+    .\$Script:ScriptName -operation install -version 0.2.3 -env ga
 
-    # Get console URL for prod environment
-    .\$Script:ScriptName --operation=get-console-url --env=prod
+    # Get console URL for EA environment
+    .\$Script:ScriptName -operation get-console-url -env ea
 
-    # Uninstall from non-prod environment
-    .\$Script:ScriptName --operation=uninstall --env=non-prod
+    # Uninstall from test environment
+    .\$Script:ScriptName -operation uninstall -env test
 
 "@
 }
@@ -869,8 +870,9 @@ Script Version: $Script:ScriptVersion
 Platform:       Windows
 Operation:      $Script:Op
 Environment:    $Script:Env
-Version:        $Script:ShoVersion
-Use ACR:        $Script:UseAcr
+    $(if ($Script:Op -eq 'install') {
+        "Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr"
+    })
 Namespace:      $Script:Namespace
 Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
@@ -904,12 +906,13 @@ function Main {
         exit 1
     }
 
-    # Show configuration
-    # Get the # Get version if not specified
-    if (-not $Script:ShoVersion -or $Script:ShoVersion -eq "latest") {
-        if (-not (Get-LatestShoVersion)) {
-            Write-LogError "Failed to fetch latest SHO version"
-            return $false
+    # For install operation, get version if not specified before showing configuration
+    if ($Script:Op -eq "install") {
+        if (-not $Script:ShoVersion -or $Script:ShoVersion -eq "latest") {
+            if (-not (Get-LatestShoVersion)) {
+                Write-LogError "Failed to fetch latest SHO version"
+                exit 1
+            }
         }
     }
     Show-Configuration

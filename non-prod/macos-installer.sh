@@ -839,21 +839,21 @@ EOF
 
 # Function to show configuration summary
 show_configuration() {
-    cat << EOF
-
-=== Configuration Summary ===
-Script Version: $SCRIPT_VERSION
-Platform:       macOS
-Operation:      $OPERATION
-Environment:    $ENV
-Version:        ${SHO_VERSION:-latest}
-Use ACR:        $USE_ACR
-Namespace:      $NAMESPACE
-Chart Name:     $CHART_NAME
-Repository:     $PUB_REGISTRY/$CHART_REPOSITORY
-Image Registry: $PUB_REGISTRY/$IMAGE_REGISTRY
-
-EOF
+    echo ""
+    echo "=== Configuration Summary ==="
+    echo "Script Version: $SCRIPT_VERSION"
+    echo "Platform:       macOS"
+    echo "Operation:      $OPERATION"
+    echo "Environment:    $ENV"
+    if [[ "$OPERATION" == "install" ]]; then
+        echo "Version:        ${SHO_VERSION:-latest}"
+        echo "Use ACR:        $USE_ACR"
+    fi
+    echo "Namespace:      $NAMESPACE"
+    echo "Chart Name:     $CHART_NAME"
+    echo "Repository:     $PUB_REGISTRY/$CHART_REPOSITORY"
+    echo "Image Registry: $PUB_REGISTRY/$IMAGE_REGISTRY"
+    echo ""
 }
 
 # Main function
@@ -878,11 +878,13 @@ main() {
         exit 1
     fi
 
-    # Get version if not specified
-    if [[ -z "$SHO_VERSION" || "$SHO_VERSION" == "latest" ]]; then
-        if ! get_latest_sho_version; then
-            log_error "Failed to fetch latest SHO version"
-            return 1
+    # For install operation, get version if not specified before showing configuration
+    if [[ "$OPERATION" == "install" ]]; then
+        if [[ -z "$SHO_VERSION" || "$SHO_VERSION" == "latest" ]]; then
+            if ! get_latest_sho_version; then
+                log_error "Failed to fetch latest SHO version"
+                return 1
+            fi
         fi
     fi
 
