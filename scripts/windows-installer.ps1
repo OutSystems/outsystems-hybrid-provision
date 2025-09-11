@@ -37,7 +37,7 @@ $Script:PubRegistry = "public.ecr.aws"
 $Script:ShoVersion = $version
 $Script:Env = $env
 $Script:Op = $operation
-$Script:UseAcr = $UseAcr.IsPresent
+$Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $true }
 
 # Derived configuration
 $Script:EcrAlias = ""
@@ -57,27 +57,27 @@ $Script:Colors = @{
 # Logging functions
 function Write-LogInfo {
     param([string]$Message)
-    Write-Host "ℹ️  $Message" -ForegroundColor $Script:Colors.Blue
+    Write-Host "[INFO] $Message" -ForegroundColor $Script:Colors.Blue
 }
 
 function Write-LogSuccess {
     param([string]$Message)
-    Write-Host "✅ $Message" -ForegroundColor $Script:Colors.Green
+    Write-Host "[SUCCESS] $Message" -ForegroundColor $Script:Colors.Green
 }
 
 function Write-LogWarning {
     param([string]$Message)
-    Write-Host "⚠️  $Message" -ForegroundColor $Script:Colors.Yellow
+    Write-Host "[WARNING] $Message" -ForegroundColor $Script:Colors.Yellow
 }
 
 function Write-LogError {
     param([string]$Message)
-    Write-Host "❌ $Message" -ForegroundColor $Script:Colors.Red
+    Write-Host "[ERROR] $Message" -ForegroundColor $Script:Colors.Red
 }
 
 function Write-LogStep {
     param([string]$Message)
-    Write-Host "🔍 $Message" -ForegroundColor $Script:Colors.Blue
+    Write-Host "[STEP] $Message" -ForegroundColor $Script:Colors.Blue
 }
 
 # Function to show usage
@@ -889,7 +889,7 @@ Image Registry: $Script:PubRegistry/$Script:ImageRegistry
 
 # Main execution
 function Main {
-    Write-Host "🪟 OutSystems Self-Hosted Operator Windows Installer v$Script:ScriptVersion" -ForegroundColor $Script:Colors.Blue
+    Write-Host "OutSystems Self-Hosted Operator Windows Installer v$Script:ScriptVersion" -ForegroundColor $Script:Colors.Blue
     Write-Host ""
     
     # Show help if requested
