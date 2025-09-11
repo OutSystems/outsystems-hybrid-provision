@@ -737,9 +737,9 @@ sho_uninstall() {
     echo
     read -p "Are you sure you want to proceed? (yes/no): " -r confirm
     
-    if [[ "$confirm" != "yes" ]]; then
+    if [[ ! "$confirm" =~ ^(yes|y)$ ]]; then
         log_info "Uninstallation cancelled"
-        return 0
+        exit 0
     fi
     
     # Check if release exists
