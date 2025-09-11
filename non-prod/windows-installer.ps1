@@ -906,14 +906,14 @@ function Main {
     # Setup environment
     Initialize-Environment
     
-    # Show configuration
-    Show-Configuration
-    
     # Check dependencies
     if (-not (Test-Dependencies)) {
         Write-LogError "Dependency check failed. Please resolve issues and try again."
         exit 1
     }
+
+    # Show configuration
+    Show-Configuration
     
     # Execute operation
     $result = $null
