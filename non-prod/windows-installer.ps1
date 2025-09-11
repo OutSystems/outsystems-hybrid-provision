@@ -501,14 +501,6 @@ function Get-LatestShoVersion {
 function Install-Sho {
     Write-LogStep "Installing OutSystems Self-Hosted Operator..."
     
-    # Get version if not specified
-    if (-not $Script:ShoVersion -or $Script:ShoVersion -eq "latest") {
-        if (-not (Get-LatestShoVersion)) {
-            Write-LogError "Failed to fetch latest SHO version"
-            return $false
-        }
-    }
-    
     Write-LogInfo "Installing SHO version: $Script:ShoVersion"
     Write-LogInfo "Environment: $Script:Env"
     Write-LogInfo "Namespace: $Script:Namespace"
@@ -877,7 +869,7 @@ Script Version: $Script:ScriptVersion
 Platform:       Windows
 Operation:      $Script:Op
 Environment:    $Script:Env
-Version:        $(if ($Script:ShoVersion) { $Script:ShoVersion } else { "latest" })
+Version:        $Script:ShoVersion
 Use ACR:        $Script:UseAcr
 Namespace:      $Script:Namespace
 Chart Name:     $Script:ChartName
@@ -913,6 +905,13 @@ function Main {
     }
 
     # Show configuration
+    # Get the # Get version if not specified
+    if (-not $Script:ShoVersion -or $Script:ShoVersion -eq "latest") {
+        if (-not (Get-LatestShoVersion)) {
+            Write-LogError "Failed to fetch latest SHO version"
+            return $false
+        }
+    }
     Show-Configuration
     
     # Execute operation
