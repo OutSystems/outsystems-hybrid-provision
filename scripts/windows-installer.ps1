@@ -2,8 +2,8 @@
 
 param(
     [string]$version = $null,
-    [ValidateSet("prod", "non-prod")]
-    [string]$env = "prod",
+    [ValidateSet("ga", "ea", "test", "pre-test")]
+    [string]$env = "pre-test",
     [ValidateSet("install", "uninstall", "get-console-url")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
@@ -27,8 +27,10 @@ $Script:ChartName = "self-hosted-operator"
 $Script:ImageName = "self-hosted-operator"
 
 # Environment-specific settings
-$Script:EcrAliasProd = "j0s5s8b0"    # GA ECR alias
-$Script:EcrAliasNonProd = "g4u4y4x2" # Lab ECR alias
+$Script:EcrAliasGa = "j0s5s8b0"    # GA ECR alias
+$Script:EcrAliasEa = "m5i8c6m7"    # EA ECR alias
+$Script:EcrAliasTest = "u4p0z5h7"  # Test ECR alias
+$Script:EcrAliasLab = "g4u4y4x2"   # Lab ECR alias (pre-test)
 $Script:PubRegistry = "public.ecr.aws"
 
 # Global variables
@@ -121,7 +123,25 @@ EXAMPLES:
 # Function to validate arguments
 function Test-Arguments {
     Write-LogStep "Validating arguments..."
-    
+
+    # Set Env to default if not provided
+    if (-not $Script:Env) {
+        Write-LogInfo "No environment specified. Using default: pre-test"
+        $Script:Env = "pre-test"
+    }
+
+    # Validate environment
+    switch ($Script:Env) {
+        "ga" { Write-LogSuccess "Environment 'ga' is valid" }
+        "ea" { Write-LogSuccess "Environment 'ea' is valid" }
+        "test" { Write-LogSuccess "Environment 'test' is valid" }
+        "pre-test" { Write-LogSuccess "Environment 'pre-test' is valid" }
+        default {
+            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, pre-test"
+            return $false
+        }
+    }
+
     # Validate version format if provided
     if ($Script:ShoVersion -and $Script:ShoVersion -ne "latest") {
         if ($Script:ShoVersion -notmatch '^\d+\.\d+\.\d+$') {
@@ -130,65 +150,72 @@ function Test-Arguments {
         }
         Write-LogSuccess "Version '$Script:ShoVersion' format is valid"
     }
-    
-    # Validate ACR configuration if enabled
+
+    # Validate ACR configuration only for install operation
     if ($Script:UseAcr) {
-        if ($Script:Op -ne "install") {
-            Write-LogError "-UseAcr flag is only applicable for install operation"
-            return $false
-        }
-        
-        Write-LogStep "Validating ACR configuration..."
-        $missingVars = @()
-        
-        if (-not $env:SP_ID) {
-            $missingVars += "SP_ID"
-        }
-        
-        if (-not $env:SP_SECRET) {
-            $missingVars += "SP_SECRET"
-        }
-        
-        if (-not $env:SH_REGISTRY) {
-            $missingVars += "SH_REGISTRY"
-        }
-        
-        if ($missingVars.Count -gt 0) {
-            Write-LogError "Missing required environment variables for ACR: $($missingVars -join ', ')"
-            Write-LogInfo "Please set the following environment variables:"
-            foreach ($var in $missingVars) {
-                Write-LogInfo "  `$env:$var = '<value>'"
+        if ($Script:Op -eq "install") {
+            Write-LogStep "Validating ACR configuration..."
+            $missingVars = @()
+            if (-not $env:SP_ID) {
+                $missingVars += "SP_ID"
             }
-            return $false
+            if (-not $env:SP_SECRET) {
+                $missingVars += "SP_SECRET"
+            }
+            if (-not $env:SH_REGISTRY) {
+                $missingVars += "SH_REGISTRY"
+            }
+            if ($missingVars.Count -gt 0) {
+                Write-LogError "Missing required environment variables for ACR: $($missingVars -join ', ')"
+                Write-LogInfo "Please set the following environment variables:"
+                foreach ($var in $missingVars) {
+                    Write-LogInfo "  `$env:$var = '<value>'"
+                }
+                return $false
+            }
+            Write-LogSuccess "ACR configuration is valid"
+        } else {
+            Write-LogInfo "Skipping ACR configuration validation (not required for operation: $($Script:Op))"
         }
-        
-        Write-LogSuccess "ACR configuration is valid"
     }
-    
-    Write-LogSuccess "Environment '$Script:Env' is valid"
+
     Write-LogSuccess "Operation '$Script:Op' is valid"
-    
     return $true
 }
 
 # Function to setup environment-specific configuration
 function Initialize-Environment {
     Write-LogStep "Setting up environment configuration for: $Script:Env"
-    
-    if ($Script:Env -eq "non-prod") {
-        $Script:EcrAlias = $Script:EcrAliasNonProd
-        Write-LogInfo "Using non-production ECR alias: $Script:EcrAlias"
-    } else {
-        $Script:EcrAlias = $Script:EcrAliasProd
-        Write-LogInfo "Using production ECR alias: $Script:EcrAlias"
+
+    switch ($Script:Env) {
+        "ga" {
+            $Script:EcrAlias = $Script:EcrAliasGa
+            Write-LogInfo "Using GA ECR alias: $($Script:EcrAlias)"
+        }
+        "ea" {
+            $Script:EcrAlias = $Script:EcrAliasEa
+            Write-LogInfo "Using EA ECR alias: $($Script:EcrAlias)"
+        }
+        "test" {
+            $Script:EcrAlias = $Script:EcrAliasTest
+            Write-LogInfo "Using Test ECR alias: $($Script:EcrAlias)"
+        }
+        "pre-test" {
+            $Script:EcrAlias = $Script:EcrAliasLab
+            Write-LogInfo "Using Pre-Test (Lab) ECR alias: $($Script:EcrAlias)"
+        }
+        default {
+            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, pre-test"
+            exit 1
+        }
     }
-    
+
     # Set repository URLs
     $Script:ChartRepository = "$Script:EcrAlias/lab/helm/self-hosted-operator"
     $Script:ImageRegistry = "$Script:EcrAlias/lab"
     $Script:ImageRepository = "$Script:EcrAlias/lab/$Script:ImageName"
     Write-LogInfo "Using ECR repository: $Script:PubRegistry/$Script:ChartRepository"
-    
+
     Write-LogSuccess "Environment setup completed"
 }
 
