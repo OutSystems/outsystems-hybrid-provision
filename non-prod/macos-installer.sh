@@ -13,13 +13,15 @@ SCRIPT_VERSION="1.0.0"
 NAMESPACE="self-hosted-operator"
 CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
-DEFAULT_ENV="prod"
+DEFAULT_ENV="pre-test" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
 DEFAULT_USE_ACR="true"  # Temporary backward compatibility for Azure ACR
 
 # Environment-specific settings
-ECR_ALIAS_PROD="j0s5s8b0"    # GA ECR alias
-ECR_ALIAS_NON_PROD="g4u4y4x2" # Lab ECR alias
+ECR_ALIAS_GA="j0s5s8b0"    # GA ECR alias
+ECR_ALIAS_EA="m5i8c6m7"    # EA ECR alias
+ECR_ALIAS_TEST="u4p0z5h7"  # Test ECR alias
+ECR_ALIAS_LAB="g4u4y4x2"  # Lab ECR alias.
 PUB_REGISTRY="public.ecr.aws"
 
 # Global variables (set by parse_arguments)
@@ -72,7 +74,7 @@ USAGE:
 
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
-    --env=ENVIRONMENT       Environment: prod, non-prod (default: prod)
+    --env=ENVIRONMENT       Environment: test, ea, ga (default: ga)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
@@ -80,21 +82,21 @@ OPTIONS:
 
 OPERATIONS:
     install                 Install OutSystems Self-Hosted Operator
-    uninstall              Uninstall OutSystems Self-Hosted Operator  
-    get-console-url        Get console URL for installed SHO
+    uninstall               Uninstall OutSystems Self-Hosted Operator  
+    get-console-url         Get console URL for installed SHO
 
 EXAMPLES:
-    # Install latest version in prod environment
+    # Install latest version in GA environment
     ${SCRIPT_NAME}
     
-    # Install specific version in non-prod environment
-    ${SCRIPT_NAME} --operation=install --version=0.2.3 --env=non-prod
+    # Install specific version in EA environment
+    ${SCRIPT_NAME} --operation=install --version=0.2.3 --env=ea
     
-    # Get console URL for prod environment
-    ${SCRIPT_NAME} --operation=get-console-url --env=prod
+    # Get console URL for test environment
+    ${SCRIPT_NAME} --operation=get-console-url --env=test
     
-    # Uninstall from non-prod environment
-    ${SCRIPT_NAME} --operation=uninstall --env=non-prod
+    # Uninstall from GA environment
+    ${SCRIPT_NAME} --operation=uninstall --env=ga
 
 EOF
 }
@@ -103,13 +105,18 @@ EOF
 validate_arguments() {
     log_step "Validating arguments..."
     
+    # Set ENV to default if not provided
+    if [[ -z "$ENV" ]]; then
+        log_info "No environment specified. Using default: $DEFAULT_ENV"
+        ENV="$DEFAULT_ENV"
+    fi
     # Validate environment
     case "$ENV" in
-        prod|non-prod)
+        ga|ea|test|pre-test)
             log_success "Environment '$ENV' is valid"
             ;;
         *)
-            log_error "Invalid environment: '$ENV'. Must be 'prod' or 'non-prod'"
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, pre-test"
             return 1
             ;;
     esac
@@ -134,38 +141,32 @@ validate_arguments() {
         log_success "Version '$SHO_VERSION' format is valid"
     fi
     
-    # Validate ACR configuration if enabled
+    # Validate ACR configuration only for install operation
     if [[ "$USE_ACR" == "true" ]]; then
-        if [[ "$OPERATION" != "install" ]]; then
-            log_error "--use-acr flag is only applicable for install operation"
-            return 1
+        if [[ "$OPERATION" == "install" ]]; then
+            log_step "Validating ACR configuration..."
+            local missing_vars=()
+            if [[ -z "${SP_ID}" ]]; then
+                missing_vars+=("SP_ID")
+            fi
+            if [[ -z "${SP_SECRET}" ]]; then
+                missing_vars+=("SP_SECRET")
+            fi
+            if [[ -z "${SH_REGISTRY}" ]]; then
+                missing_vars+=("SH_REGISTRY")
+            fi
+            if [[ ${#missing_vars[@]} -gt 0 ]]; then
+                log_error "Missing required environment variables for ACR: ${missing_vars[*]}"
+                log_info "Please set the following environment variables:"
+                for var in "${missing_vars[@]}"; do
+                    log_info "  export $var=<value>"
+                done
+                return 1
+            fi
+            log_success "ACR configuration is valid"
+        else
+            log_info "Skipping ACR configuration validation (not required for operation: $OPERATION)"
         fi
-        
-        log_step "Validating ACR configuration..."
-        local missing_vars=()
-        
-        if [[ -z "${SP_ID}" ]]; then
-            missing_vars+=("SP_ID")
-        fi
-        
-        if [[ -z "${SP_SECRET}" ]]; then
-            missing_vars+=("SP_SECRET")
-        fi
-        
-        if [[ -z "${SH_REGISTRY}" ]]; then
-            missing_vars+=("SH_REGISTRY")
-        fi
-        
-        if [[ ${#missing_vars[@]} -gt 0 ]]; then
-            log_error "Missing required environment variables for ACR: ${missing_vars[*]}"
-            log_info "Please set the following environment variables:"
-            for var in "${missing_vars[@]}"; do
-                log_info "  export $var=<value>"
-            done
-            return 1
-        fi
-        
-        log_success "ACR configuration is valid"
     fi
     
     return 0
@@ -227,21 +228,36 @@ parse_arguments() {
 # Function to setup environment-specific configuration
 setup_environment() {
     log_step "Setting up environment configuration for: $ENV"
-    
-    if [[ "$ENV" == "non-prod" ]]; then
-        ECR_ALIAS="$ECR_ALIAS_NON_PROD"
-        log_info "Using non-production ECR alias: $ECR_ALIAS"
-    else
-        ECR_ALIAS="$ECR_ALIAS_PROD"
-        log_info "Using production ECR alias: $ECR_ALIAS"
-    fi
-    
+
+    case "$ENV" in
+        ga)
+            ECR_ALIAS="$ECR_ALIAS_GA"
+            log_info "Using GA ECR alias: $ECR_ALIAS"
+            ;;
+        ea)
+            ECR_ALIAS="$ECR_ALIAS_EA"
+            log_info "Using EA ECR alias: $ECR_ALIAS"
+            ;;
+        test)
+            ECR_ALIAS="$ECR_ALIAS_TEST"
+            log_info "Using Test ECR alias: $ECR_ALIAS"
+            ;;
+        pre-test)
+            ECR_ALIAS="$ECR_ALIAS_LAB"
+            log_info "Using Pre-Test (Lab) ECR alias: $ECR_ALIAS"
+            ;;
+        *)
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, pre-test"
+            exit 1
+            ;;
+    esac
+
     # Set repository URLs
     CHART_REPOSITORY="${ECR_ALIAS}/lab/helm/self-hosted-operator"
     IMAGE_REGISTRY="${ECR_ALIAS}/lab"
     IMAGE_REPOSITORY="${ECR_ALIAS}/lab/$IMAGE_NAME"
     log_info "Using ECR repository: $PUB_REGISTRY/$CHART_REPOSITORY"
-    
+
     log_success "Environment setup completed"
 }
 
