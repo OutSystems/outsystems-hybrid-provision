@@ -45,7 +45,7 @@ Before you can use ODC Studio, download it from the ODC Portal and login to your
 
 For the setup of the self-hosted operator, the cluster must meet the following requirements:
 
-1. At least 3 worker nodes
+1. At least 4 worker nodes
 2. Minimum of 4 CPU Cores per worker node
 3. Minimum of 4 GB RAM per worker node
 4. OpenShift version >= 4.15.9* or Kubernetes* >= 1.28
@@ -72,7 +72,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 **Windows PowerShell:**
 ```powershell
 # Run locally
-.\scripts\windows-installer.ps1 --operation=install
+.\scripts\windows-installer.ps1 -operation install
 ```
 
 ### Command-Line Options
@@ -80,7 +80,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Linux/macOS Options
 ```bash
 --version=VERSION        # SHO version to install/manage (default: latest)
---env=ENVIRONMENT       # Environment: prod, non-prod (default: prod)
+--env=ENVIRONMENT       # Environment: test, ea, ga (default: ga)
 --operation=OPERATION   # Operation: install, uninstall, get-console-url (default: install)
 --help, -h              # Show help message
 ```
@@ -88,7 +88,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Windows PowerShell Options
 ```powershell
 --version=VERSION        # SHO version to install/manage (default: latest)
---env=ENVIRONMENT       # Environment: prod, non-prod (default: prod)
+--env=ENVIRONMENT       # Environment: test, ea, ga (default: ga)
 --operation=OPERATION   # Operation: install, uninstall, get-console-url (default: install)
 --help, -h              # Show help message
 ```
@@ -111,7 +111,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 ./scripts/linux-installer.sh --operation=install --version=0.2.3
 
 # Windows
-.\scripts\windows-installer.ps1 --operation=install --version=0.2.3 --env=non-prod 
+.\scripts\windows-installer.ps1 --operation=install -version 0.2.3 
 ```
 
 #### Get Console URL
@@ -120,7 +120,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 ./scripts/linux-installer.sh --operation=get-console-url
 
 # Windows
-.\scripts\windows-installer.ps1 --operation=get-console-url --env=prod
+.\scripts\windows-installer.ps1 -operation get-console-url
 ```
 
 #### Uninstall SHO
@@ -129,14 +129,14 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 ./scripts/linux-installer.sh --operation=uninstall
 
 # Windows
-.\scripts\windows-installer.ps1 --operation=uninstall --env=prod
+.\scripts\windows-installer.ps1 -operation uninstall
 ```
 
 ### Getting Started
 
 Once installation is complete:
 
-1. Access the SHO console via the provided URL (typically `http://<load-balancer-ip>:5050`)
+1. Access the SHO console via the provided URL (typically `http://localhost:5050`)
 2. Log in to your OutSystems tenant
 3. Navigate to the Self-Hosted Setup section
 4. Follow the tenant-specific configuration instructions
