@@ -403,7 +403,7 @@ function Test-Dependencies {
         Write-LogError "PowerShell 5.0 or higher is required. Current version: $($PSVersionTable.PSVersion)"
         $allDepsOk = $false
     } else {
-        Write-LogSuccess "PowerShell version is sufficient: $($PSVersionTable.PSVersion)"
+        Write-LogSuccess "PowerShell version matches requirement (5.0 or higher): $($PSVersionTable.PSVersion)"
     }
     
     # Check kubectl
@@ -756,7 +756,7 @@ function Uninstall-Sho {
     Write-LogInfo "Namespace: $Script:Namespace"
     Write-Host ""
     
-    $confirm = Read-Host "Are you sure you want to proceed? (yes/no)"
+    $confirm = Read-Host "Are you sure you want to proceed? (y/n)"
     if ($confirm -notmatch '^(?i)y(es)?$') {
         Write-LogInfo "Uninstallation cancelled"
         exit 0
@@ -794,7 +794,7 @@ function Uninstall-Sho {
         Write-LogSuccess "SHO release uninstalled successfully"
         
         # Optional: Delete namespace
-        $deleteNs = Read-Host "Do you want to delete the namespace '$Script:Namespace'? (yes/no)"
+        $deleteNs = Read-Host "Do you want to delete the namespace '$Script:Namespace'? (y/n)"
             if ($deleteNs -match '^(?i)y(es)?$') {
             kubectl delete namespace $Script:Namespace --wait=false 2>$null
             Write-LogInfo "Namespace deletion initiated"
