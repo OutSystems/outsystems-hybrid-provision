@@ -10,13 +10,13 @@ SCRIPT_VERSION="1.0.0"
 NAMESPACE="self-hosted-operator"
 CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
-DEFAULT_ENV="pre-test" # Default environment as per the release state. Change this value as release progress.
+DEFAULT_ENV="ea" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
-DEFAULT_USE_ACR="true"  # Temporary backward compatibility for Azure ACR
+DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0"    # GA ECR alias
-ECR_ALIAS_EA="m5i8c6m7"    # EA ECR alias
+ECR_ALIAS_EA="g4u4y4x2"    # EA ECR alias
 ECR_ALIAS_TEST="u4p0z5h7"  # Test ECR alias
 ECR_ALIAS_LAB="g4u4y4x2"  # Lab ECR alias.
 PUB_REGISTRY="public.ecr.aws"
