@@ -3,11 +3,11 @@
 param(
     [string]$version = $null,
     [ValidateSet("ga", "ea", "test", "pre-test")]
-    [string]$env = "pre-test",
+    [string]$env = "ea",
     [ValidateSet("install", "uninstall", "get-console-url")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
-    [string]$use_acr = "true",  # Temporary backward compatibility for Azure ACR
+    [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
     [switch]$UseAcr,
     [Alias("h")]
     [switch]$help
@@ -28,7 +28,7 @@ $Script:ImageName = "self-hosted-operator"
 
 # Environment-specific settings
 $Script:EcrAliasGa = "j0s5s8b0"    # GA ECR alias
-$Script:EcrAliasEa = "m5i8c6m7"    # EA ECR alias
+$Script:EcrAliasEa = "g4u4y4x2"    # EA ECR alias
 $Script:EcrAliasTest = "u4p0z5h7"  # Test ECR alias
 $Script:EcrAliasLab = "g4u4y4x2"   # Lab ECR alias (pre-test)
 $Script:PubRegistry = "public.ecr.aws"
@@ -128,7 +128,7 @@ function Test-Arguments {
     # Set Env to default if not provided
     if (-not $Script:Env) {
         Write-LogInfo "No environment specified. Using default: pre-test"
-        $Script:Env = "pre-test"
+        $Script:Env = "ea"
     }
 
     # Validate environment
