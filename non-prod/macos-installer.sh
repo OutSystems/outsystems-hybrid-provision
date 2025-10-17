@@ -12,7 +12,7 @@ CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
 DEFAULT_ENV="ea" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
-DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
+DEFAULT_USE_ACR="true"  # Temporary backward compatibility for Azure ACR
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0"    # GA ECR alias
