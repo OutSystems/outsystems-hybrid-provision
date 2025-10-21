@@ -7,7 +7,7 @@ param(
     [ValidateSet("install", "uninstall", "get-console-url")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
-    [string]$use_acr = "true",  # Temporary backward compatibility for Azure ACR
+    [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
     [switch]$UseAcr,
     [Alias("h")]
     [switch]$help
