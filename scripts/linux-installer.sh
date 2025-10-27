@@ -15,10 +15,10 @@ DEFAULT_OPERATION="install"
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 
 # Environment-specific settings
-ECR_ALIAS_GA="j0s5s8b0"    # GA ECR alias
-ECR_ALIAS_EA="g4u4y4x2"    # EA ECR alias
-ECR_ALIAS_TEST="u4p0z5h7"  # Test ECR alias
-ECR_ALIAS_LAB="g4u4y4x2"   # Lab ECR alias (pre-test)
+ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
+ECR_ALIAS_EA="g4u4y4x2/lab"    # EA ECR alias #m5i8c6m7/ea
+ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
+ECR_ALIAS_LAB="g4u4y4x2/lab"  # Lab ECR alias (Pre-Test)
 PUB_REGISTRY="public.ecr.aws"
 
 # Global variables (set by parse_arguments)
@@ -247,9 +247,9 @@ setup_environment() {
     esac
 
     # Set repository URLs
-    CHART_REPOSITORY="${ECR_ALIAS}/lab/helm/self-hosted-operator"
-    IMAGE_REGISTRY="${ECR_ALIAS}/lab"
-    IMAGE_REPOSITORY="${ECR_ALIAS}/lab/$IMAGE_NAME"
+    CHART_REPOSITORY="${ECR_ALIAS}/helm/self-hosted-operator"
+    IMAGE_REGISTRY="${ECR_ALIAS}"
+    IMAGE_REPOSITORY="${ECR_ALIAS}/$IMAGE_NAME"
     log_info "Using ECR repository: $PUB_REGISTRY/$CHART_REPOSITORY"
 
     log_success "Environment setup completed"
@@ -466,6 +466,18 @@ get_latest_sho_version() {
 # Function to install SHO
 sho_install() {
     log_step "Installing OutSystems Self-Hosted Operator..."
+
+    # Validate if self-hosted-operator namespace already exists and its not in terminating state
+    if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+        local ns_status
+        ns_status=$(kubectl get namespace "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+        if [[ "$ns_status" == "Terminating" ]]; then
+            log_error "Namespace '$NAMESPACE' is in 'Terminating' state. Please resolve this before proceeding."
+            return 1
+        else
+            log_info "Namespace '$NAMESPACE' already exists."
+        fi
+    fi
     
     log_info "Installing SHO version: $SHO_VERSION"
     log_info "Environment: $ENV"
@@ -851,6 +863,12 @@ main() {
     
     # Setup environment
     setup_environment
+
+    # Check dependencies
+    if ! check_dependencies; then
+        log_error "Dependency check failed. Please resolve issues and try again."
+        exit 1
+    fi
     
     # For install operation, get version if not specified before showing configuration
     if [[ "$OPERATION" == "install" ]]; then
@@ -864,12 +882,6 @@ main() {
     
     # Show configuration
     show_configuration
-    
-    # Check dependencies
-    if ! check_dependencies; then
-        log_error "Dependency check failed. Please resolve issues and try again."
-        exit 1
-    fi
     
     # Execute operation
     case "$OPERATION" in
