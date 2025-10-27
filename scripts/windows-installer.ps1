@@ -4,7 +4,7 @@ param(
     [string]$version = $null,
     [ValidateSet("ga", "ea", "test", "pre-test")]
     [string]$env = "ea",
-    [ValidateSet("install", "uninstall", "get-console-url")]
+    [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
     [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
@@ -27,17 +27,17 @@ $Script:ChartName = "self-hosted-operator"
 $Script:ImageName = "self-hosted-operator"
 
 # Environment-specific settings
-$Script:EcrAliasGa = "j0s5s8b0"    # GA ECR alias
-$Script:EcrAliasEa = "g4u4y4x2"    # EA ECR alias
-$Script:EcrAliasTest = "u4p0z5h7"  # Test ECR alias
-$Script:EcrAliasLab = "g4u4y4x2"   # Lab ECR alias (pre-test)
+$Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
+$Script:EcrAliasEa = "g4u4y4x2/lab"    # EA ECR alias #m5i8c6m7/ea
+$Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
+$Script:EcrAliasLab = "g4u4y4x2/lab"   # Lab ECR alias (pre-test)
 $Script:PubRegistry = "public.ecr.aws"
 
 # Global variables
 $Script:ShoVersion = $version
 $Script:Env = $env
 $Script:Op = $operation
-$Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $true }
+$Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $false }
 
 # Derived configuration
 $Script:EcrAlias = ""
@@ -101,6 +101,7 @@ OPERATIONS:
     install                  Install OutSystems Self-Hosted Operator
     uninstall                Uninstall OutSystems Self-Hosted Operator
     get-console-url          Get console URL for installed SHO
+    stop-port-forward        Stop port forwarding processes
 
 EXAMPLES:
     # Install latest version in pre-test environment
@@ -212,9 +213,9 @@ function Initialize-Environment {
     }
 
     # Set repository URLs
-    $Script:ChartRepository = "$Script:EcrAlias/lab/helm/self-hosted-operator"
-    $Script:ImageRegistry = "$Script:EcrAlias/lab"
-    $Script:ImageRepository = "$Script:EcrAlias/lab/$Script:ImageName"
+    $Script:ChartRepository = "$Script:EcrAlias/helm/self-hosted-operator"
+    $Script:ImageRegistry = "$Script:EcrAlias"
+    $Script:ImageRepository = "$Script:EcrAlias/$Script:ImageName"
     Write-LogInfo "Using ECR repository: $Script:PubRegistry/$Script:ChartRepository"
 
     Write-LogSuccess "Environment setup completed"
@@ -501,6 +502,18 @@ function Get-LatestShoVersion {
 # Function to install SHO
 function Install-Sho {
     Write-LogStep "Installing OutSystems Self-Hosted Operator..."
+
+    # Validate if self-hosted-operator namespace already exists and its not in terminating state
+    kubectl get namespace $Script:Namespace 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $nsStatus = kubectl get namespace $Script:Namespace -o jsonpath='{.status.phase}' 2>$null
+        if ($nsStatus -eq "Terminating") {
+            Write-LogError "Namespace '$Script:Namespace' is in 'Terminating' state. Please resolve this before proceeding."
+            return $false
+        } else {
+            Write-LogInfo "Namespace '$Script:Namespace' already exists."
+        }
+    }
     
     Write-LogInfo "Installing SHO version: $Script:ShoVersion"
     Write-LogInfo "Environment: $Script:Env"
@@ -658,32 +671,78 @@ function Start-PortForwarding {
             return $false
         }
         
-        # Kill any existing port forwarding on the same port
-        Write-LogInfo "Checking for existing port forwarding on port $localPort..."
-        $existingProcess = Get-Process -Name "kubectl" -ErrorAction SilentlyContinue | Where-Object {
-            $_.CommandLine -like "*port-forward*:$localPort*"
+        # Check if port forwarding is already active
+        if (Test-PortForwardingActive -Port $localPort) {
+            Write-LogSuccess "Port forwarding is already active on port $localPort"
+            Write-LogSuccess "SHO Console URL: http://localhost:$localPort"
+            Start-Process "http://localhost:$localPort"
+            Write-LogSuccess "Browser opened"
+            return $true
         }
         
-        if ($existingProcess) {
-            Write-LogInfo "Stopping existing port forwarding process..."
-            $existingProcess | Stop-Process -Force
-            Start-Sleep 2
-        }
+        # Stop any existing port forwarding
+        Stop-PortForwarding
         
-        # Start port forwarding in background
+        # Wait for cleanup to complete
+        Start-Sleep 3
+        
+        # Start port forwarding as detached process
         Write-LogInfo "Starting port forwarding: localhost:$localPort -> $serviceName`:$servicePort"
-        $portForwardJob = Start-Job -ScriptBlock {
-            param($namespace, $serviceName, $localPort, $servicePort)
-            kubectl port-forward -n $namespace svc/$serviceName $localPort`:$servicePort
-        } -ArgumentList $Script:Namespace, $serviceName, $localPort, $servicePort
         
-        # Wait a moment for port forwarding to establish
+        $processArgs = @{
+            FilePath = "kubectl"
+            ArgumentList = @(
+                "port-forward",
+                "-n", $Script:Namespace,
+                "svc/$serviceName",
+                "$localPort`:$servicePort"
+            )
+            WindowStyle = "Hidden"
+            PassThru = $true
+        }
+        
+        $portForwardProcess = Start-Process @processArgs
+        
+        # Verify the process was actually started
+        if ($portForwardProcess -and $portForwardProcess.Id) {
+            Write-LogInfo "kubectl process created with PID: $($portForwardProcess.Id)"
+            
+            # Check if the process is still running after a moment
+            Start-Sleep 2
+            $processCheck = Get-Process -Id $portForwardProcess.Id -ErrorAction SilentlyContinue
+            if ($processCheck) {
+                Write-LogInfo "Process verified running: $($processCheck.ProcessName) (PID: $($processCheck.Id))"
+            } else {
+                Write-LogWarning "Process $($portForwardProcess.Id) appears to have terminated immediately"
+            }
+        } else {
+            Write-LogError "Failed to start kubectl process"
+            return $false
+        }
+        
+        # Wait for port forwarding to establish
         Write-LogInfo "Waiting for port forwarding to establish..."
-        Start-Sleep 5
+        Start-Sleep 6
         
         $localUrl = "http://localhost:$localPort"
-        Write-LogSuccess "Port forwarding established!"
+        Write-LogSuccess "Port forwarding setup completed"
         Write-LogSuccess "SHO Console URL: $localUrl"
+        
+        # Show current kubectl processes for debugging
+        $currentKubectlProcesses = Get-Process -Name "kubectl" -ErrorAction SilentlyContinue
+        if ($currentKubectlProcesses) {
+            Write-LogInfo "Current kubectl processes:"
+            foreach ($proc in $currentKubectlProcesses) {
+                Write-LogInfo "  PID: $($proc.Id), Started: $($proc.StartTime)"
+            }
+        }
+        
+        # Show what's using port 5050
+        $portUsage = netstat -ano | findstr ":$localPort"
+        if ($portUsage) {
+            Write-LogInfo "Port $localPort usage:"
+            $portUsage | ForEach-Object { Write-LogInfo "  $_" }
+        }
         
         # Test URL accessibility
         $maxAttempts = 12  # 60 seconds total
@@ -697,8 +756,9 @@ function Start-PortForwarding {
                 Write-LogSuccess "SHO console is responding!"
                 Start-Process $localUrl
                 Write-LogSuccess "Browser opened"
-                Write-LogInfo "Port forwarding is running in the background (Job ID: $($portForwardJob.Id))"
-                Write-LogInfo "To stop port forwarding, run: Stop-Job $($portForwardJob.Id); Remove-Job $($portForwardJob.Id)"
+                Write-LogInfo "Port forwarding is running independently"
+                Write-LogInfo "To stop: .\$Script:ScriptName -operation stop-port-forward"
+                Write-LogInfo "Or manually: kubectl delete pod -l app.kubernetes.io/name=kubectl --field-selector=status.phase=Running"
             } else {
                 $attempts++
                 if ($attempts -lt $maxAttempts) {
@@ -711,7 +771,7 @@ function Start-PortForwarding {
         if (-not $accessible) {
             Write-LogWarning "SHO console is not yet responding"
             Write-LogInfo "Please wait a few minutes and access: $localUrl"
-            Write-LogInfo "Port forwarding is running in the background (Job ID: $($portForwardJob.Id))"
+            Write-LogInfo "Port forwarding is running independently"
         }
         
         return $true
@@ -743,6 +803,109 @@ function Test-UrlAccessible {
     return $false
 }
 
+# Function to check if port forwarding is already active
+function Test-PortForwardingActive {
+    param([int]$Port = 5050)
+    
+    # Check if port is listening
+    $portInUse = netstat -ano | findstr ":$Port" | Select-Object -First 1
+    if (-not $portInUse) {
+        return $false
+    }
+    
+    # Test if the port actually responds
+    $portTest = Test-NetConnection -ComputerName localhost -Port $Port -InformationLevel Quiet -WarningAction SilentlyContinue
+    if ($portTest) {
+        # Test if it's actually our service
+        if (Test-UrlAccessible "http://localhost:$Port") {
+            return $true
+        }
+    }
+    
+    return $false
+}
+
+# Function to stop port forwarding
+function Stop-PortForwarding {
+    Write-LogStep "Stopping port forwarding processes..."
+    
+    $processesKilled = $false
+    
+    # Method 1: Use WMI/CIM to find kubectl processes with port-forward in command line
+    try {
+        $portForwardProcesses = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { 
+            $_.Name -eq "kubectl.exe" -and $_.CommandLine -like "*port-forward*" 
+        }
+        
+        if ($portForwardProcesses) {
+            Write-LogInfo "Found $($portForwardProcesses.Count) kubectl port-forward process(es) via CIM"
+            foreach ($proc in $portForwardProcesses) {
+                Write-LogInfo "Stopping kubectl port-forward process (PID: $($proc.ProcessId))"
+                Write-LogInfo "Command: $($proc.CommandLine)"
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+                $processesKilled = $true
+            }
+        }
+    } catch {
+        Write-LogWarning "CIM query failed: $($_.Exception.Message)"
+    }
+    
+    # Method 2: Find processes using port 5050 specifically
+    try {
+        $portInfo = netstat -ano | findstr ":5050"
+        if ($portInfo) {
+            Write-LogInfo "Found processes using port 5050:"
+            $portInfo | ForEach-Object {
+                Write-LogInfo "  $_"
+                if ($_ -match '\s+(\d+)$') {
+                    $processId = $matches[1]
+                    if ($processId -ne "0") {
+                        try {
+                            $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+                            if ($process) {
+                                Write-LogInfo "Stopping process using port 5050: $($process.ProcessName) (PID: $processId)"
+                            } else {
+                                Write-LogInfo "Stopping process using port 5050 (PID: $processId)"
+                            }
+                            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                            $processesKilled = $true
+                        } catch {
+                            Write-LogWarning "Failed to stop process $processId`: $_"
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-LogWarning "netstat query failed: $($_.Exception.Message)"
+    }
+    
+    # Method 3: Fallback - kill all kubectl processes (more aggressive)
+    try {
+        $allKubectlProcesses = Get-Process -Name "kubectl" -ErrorAction SilentlyContinue
+        if ($allKubectlProcesses) {
+            Write-LogInfo "Found $($allKubectlProcesses.Count) kubectl process(es), stopping all as fallback"
+            foreach ($proc in $allKubectlProcesses) {
+                Write-LogInfo "Stopping kubectl process (PID: $($proc.Id))"
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                $processesKilled = $true
+            }
+        }
+    } catch {
+        Write-LogWarning "kubectl process cleanup failed: $($_.Exception.Message)"
+    }
+    
+    if ($processesKilled) {
+        Write-LogSuccess "Port forwarding processes stopped"
+        # Wait a moment for processes to actually terminate
+        Start-Sleep 2
+    } else {
+        Write-LogInfo "No port forwarding processes found"
+    }
+    
+    return $true
+}
+
 # Function to uninstall SHO
 function Uninstall-Sho {
     Write-LogStep "Uninstalling OutSystems Self-Hosted Operator..."
@@ -769,16 +932,8 @@ function Uninstall-Sho {
         return $false
     }
     
-    # Stop any existing port forwarding jobs
-    Write-LogStep "Stopping port forwarding jobs..."
-    $portForwardJobs = Get-Job | Where-Object { $_.Command -like "*kubectl port-forward*" }
-    if ($portForwardJobs) {
-        $portForwardJobs | Stop-Job
-        $portForwardJobs | Remove-Job
-        Write-LogInfo "Port forwarding jobs stopped"
-    } else {
-        Write-LogInfo "No port forwarding jobs found"
-    }
+    # Stop any existing port forwarding
+    Stop-PortForwarding
     
     # Clean up resources
     Write-LogStep "Cleaning up resources..."
@@ -927,6 +1082,9 @@ function Main {
         }
         "get-console-url" {
             $result = Get-ConsoleUrl
+        }
+        "stop-port-forward" {
+            $result = Stop-PortForwarding
         }
         default {
             Write-LogError "Unknown operation: $Script:Op"
