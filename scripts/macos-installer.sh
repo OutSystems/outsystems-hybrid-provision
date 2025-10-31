@@ -98,6 +98,12 @@ EXAMPLES:
 EOF
 }
 
+logout_ecr_public() {
+    # Remove Helm and Docker credentials for the public registry if they exist
+    helm registry logout "$PUB_REGISTRY" 2>/dev/null || true
+    docker logout "$PUB_REGISTRY" 2>/dev/null || true
+}
+
 # Function to validate arguments
 validate_arguments() {
     log_step "Validating arguments..."
@@ -426,49 +432,44 @@ check_dependencies() {
 get_latest_sho_version() {
     log_step "Fetching latest SHO version..."
     
-    local token_response
-    token_response=$(curl -sL "https://${PUB_REGISTRY}/token?scope=repository:${IMAGE_REPOSITORY}:pull" 2>/dev/null)
+    # Get public ECR token
+    local token_json
+    token_json=$(curl -sL "https://${PUB_REGISTRY}/token?scope=repository:${CHART_REPOSITORY}:pull")
     
-    if [[ $? -ne 0 || -z "$token_response" ]]; then
-        log_error "Failed to get token from ECR public API"
+    if [[ $? -ne 0 || -z "$token_json" ]]; then
+        log_error "Failed to get ECR token"
         return 1
     fi
     
     local token
-    token=$(echo "$token_response" | jq -r '.token' 2>/dev/null)
+    token=$(echo "$token_json" | jq -r '.token')
     
     if [[ -z "$token" || "$token" == "null" ]]; then
         log_error "Failed to extract token from ECR response"
         return 1
     fi
     
-    local tags_response
-    tags_response=$(curl -s -H "Authorization: Bearer $token" \
-        "https://${PUB_REGISTRY}/v2/${IMAGE_REPOSITORY}/tags/list" 2>/dev/null)
+    # Get chart tags
+    local tags_json
+    tags_json=$(curl -s -H "Authorization: Bearer $token" "https://${PUB_REGISTRY}/v2/${CHART_REPOSITORY}/tags/list")
     
-    if [[ $? -ne 0 || -z "$tags_response" ]]; then
-        log_error "Failed to fetch tags from ECR repository"
+    if [[ $? -ne 0 || -z "$tags_json" ]]; then
+        log_error "Failed to fetch chart tags"
         return 1
     fi
     
-    local tags
-    tags=$(echo "$tags_response" | jq -r '.tags[]' 2>/dev/null)
+    # Find latest version (assumes semantic versioning)
+    local latest_version
+    latest_version=$(echo "$tags_json" | jq -r '.tags[]' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
     
-    if [[ -z "$tags" ]]; then
-        log_error "No tags found in ECR repository response"
+    if [[ -z "$latest_version" ]]; then
+        log_error "Failed to find valid chart version"
+        echo "Available tags:"
+        echo "$tags_json" | jq -r '.tags[]'
         return 1
     fi
     
-    local latest_image_version
-    latest_image_version=$(echo "$tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
-    
-    if [[ -z "$latest_image_version" ]]; then
-        log_error "Failed to find a valid image version from tags"
-        log_info "Available image version tags: $tags"
-        return 1
-    fi
-    
-    SHO_VERSION="${latest_image_version#v}"
+    SHO_VERSION="$latest_version"
     log_success "Latest version found: $SHO_VERSION"
     return 0
 }
@@ -496,6 +497,9 @@ sho_install() {
     # Enable OCI mode for Helm
     export HELM_EXPERIMENTAL_OCI=1
     
+    # Logout from ECR public registry to avoid stale credentials
+    logout_ecr_public
+
     # Pull chart to temp directory
     local chart_oci="oci://${PUB_REGISTRY}/${CHART_REPOSITORY}"
     local tmpdir
