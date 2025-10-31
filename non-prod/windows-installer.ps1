@@ -460,7 +460,7 @@ function Get-LatestShoVersion {
     
     try {
         # Get token from ECR public API
-        $tokenUri = "https://$Script:PubRegistry/token?scope=repository:$Script:ImageRepository`:pull"
+        $tokenUri = "https://$Script:PubRegistry/token?scope=repository:$Script:ChartRepository`:pull"
         $tokenResponse = Invoke-RestMethod -Uri $tokenUri -Method Get
         
         if (-not $tokenResponse.token) {
@@ -469,7 +469,7 @@ function Get-LatestShoVersion {
         }
         
         # Get tags using the token
-        $tagsUri = "https://$Script:PubRegistry/v2/$Script:ImageRepository/tags/list"
+        $tagsUri = "https://$Script:PubRegistry/v2/$Script:ChartRepository/tags/list"
         $headers = @{ Authorization = "Bearer $($tokenResponse.token)" }
         $tagsResponse = Invoke-RestMethod -Uri $tagsUri -Headers $headers -Method Get
         
@@ -479,16 +479,17 @@ function Get-LatestShoVersion {
         }
         
         # Find latest version
-        $versionTags = $tagsResponse.tags | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' }
+        $versionTags = $tagsResponse.tags | Where-Object { $_ -match '^\d+\.\d+\.\d+$' }
         if (-not $versionTags) {
-            Write-LogError "Failed to find a valid image version from tags"
-            Write-LogInfo "Available image version tags: $($tagsResponse.tags -join ', ')"
+            Write-LogError "Failed to find valid chart version"
+            Write-LogInfo "Available tags:"
+            $tagsResponse.tags | ForEach-Object { Write-LogInfo "  $_" }
             return $false
         }
         
-        # Sort versions and get the latest
-        $latestImageVersion = $versionTags | Sort-Object { [version]($_ -replace '^v', '') } | Select-Object -Last 1
-        $Script:ShoVersion = $latestImageVersion -replace '^v', ''
+        # Sort versions numerically and get the latest
+        $latestVersion = $versionTags | Sort-Object { [version]$_ } | Select-Object -Last 1
+        $Script:ShoVersion = $latestVersion
         
         Write-LogSuccess "Latest version found: $Script:ShoVersion"
         return $true
@@ -497,6 +498,24 @@ function Get-LatestShoVersion {
         Write-LogError "Failed to fetch latest SHO version: $($_.Exception.Message)"
         return $false
     }
+}
+
+
+function Logout-EcrPublic {
+    # Clear any cached ECR Public credentials
+    Write-LogStep "Ensuring no stale credentials for ECR Public..."
+    try {
+        if (Test-Command "helm") {
+            & helm registry logout $Script:PubRegistry 2>$null | Out-Null
+            Write-LogInfo "Logged out of Helm registry: $Script:PubRegistry"
+        }
+    } catch {}
+    try {
+        if (Test-Command "docker") {
+            & docker logout $Script:PubRegistry 2>$null | Out-Null
+            Write-LogInfo "Logged out of Docker registry: $Script:PubRegistry"
+        }
+    } catch {}
 }
 
 # Function to install SHO
@@ -522,15 +541,18 @@ function Install-Sho {
     # Enable OCI mode for Helm
     $env:HELM_EXPERIMENTAL_OCI = "1"
     
+    # Logout from ECR public registry to avoid stale credentials
+    Logout-EcrPublic
+
     # Pull chart to temp directory
     $chartOci = "oci://$Script:PubRegistry/$Script:ChartRepository"
     $tmpDirPath = New-TemporaryDirectory
-	Write-LogInfo "Location: $tmpDirPath"
-    
+    Write-LogInfo "Location: $tmpDirPath"
+
     try {
         Write-LogStep "Pulling chart from: $chartOci"
         Write-LogInfo "helm pull $chartOci --version $Script:ShoVersion -d $tmpDirPath"
-		helm pull $chartOci --version $Script:ShoVersion -d $tmpDirPath
+        helm pull $chartOci --version $Script:ShoVersion -d $tmpDirPath
         
         if ($LASTEXITCODE -ne 0) {
             Write-LogError "Failed to pull Helm chart"
@@ -971,7 +993,7 @@ function Get-ConsoleUrl {
     helm status $Script:ChartName -n $Script:Namespace 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-LogError "OutSystems Self-Hosted Operator is not installed"
-        Write-LogInfo "Please install it first using: .\$Script:ScriptName -Operation install"
+        Write-LogInfo "Please install it first using: .\$Script:ScriptName -operation install"
         return $false
     }
     
