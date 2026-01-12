@@ -127,6 +127,11 @@ validate_arguments() {
     # Validate operation
     case "$OPERATION" in
         install|uninstall|get-console-url)
+            # Temporarily disable uninstall operation
+            if [[ "$OPERATION" == "uninstall" ]]; then
+                log_error "The uninstall operation is currently unavailable. Please contact support for assistance with uninstallation."
+                return 1
+            fi
             log_success "Operation '$OPERATION' is valid"
             ;;
         *)
