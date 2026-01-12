@@ -1,69 +1,98 @@
-name: PR (Non-Prod)
+name: PR Preview Release
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/pr-release.yml'
 
 permissions:
-  id-token: write
   contents: write
-  pages: write
+  pull-requests: write
 
 jobs:
-  deploy-non-prod:
+  pr-preview:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Prepare preview content in /tmp (read-only)
+      - name: Set PR number
+        id: pr
+        run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+
+      - name: Prepare scripts with dev default
         run: |
-          STAGING_DIR="/tmp/preview/non-prod"
-          mkdir -p "$STAGING_DIR"
-          INDEX_FILE="$STAGING_DIR/index.html"
-
-          echo '<!DOCTYPE html>
-          <html><head><meta charset="utf-8"><title>Non-Prod Scripts</title></head><body><ul>' > "$INDEX_FILE"
-
-          for file in scripts/*; do
-            if [ -f "$file" ]; then
-              filename="${file##*/}"
-              # Copy to staging
-              cp "$file" "$STAGING_DIR/$filename"
-
-              echo "<li><a href=\"./$filename\">$filename</a></li>" >> "$INDEX_FILE"
-            fi
-          done
-
-          echo '</ul></body></html>' >> "$INDEX_FILE"
-
-          # root-level index.html with a link to non-prod
-          echo '<!DOCTYPE html>
-          <html><head><meta charset="utf-8"><title>Script Index</title></head><body>
-          <h1>Available Environments</h1>
-          <ul>
-            <li><a href="./non-prod/index.html">Non-Prod</a></li>
-          </ul>
-          </body></html>' > /tmp/preview/index.html
-
-      - name: Switch to preview branch and push content
-        run: |
-          STAGING_DIR="/tmp/preview"
-
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-
-          git fetch origin non-prod-preview || true
-          git switch non-prod-preview || git checkout -b non-prod-preview
-
-          # Clean repo and copy from staging
-          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-          cp -r "$STAGING_DIR"/* .
-
-          # Add a dummy change to force commit (timestamp)
-          echo "Updated at $(date --utc +'%Y-%m-%dT%H:%M:%SZ')" > .last_update
-
-          git add .
-          git commit -m "🔁 Update non-prod preview for PR #${{ github.event.pull_request.number }} at $(date --utc +'%Y-%m-%dT%H:%M:%SZ')"
-          git push origin HEAD:non-prod-preview
+          mkdir -p pr-scripts
           
+          # Process linux-installer.sh
+          cp scripts/linux-installer.sh pr-scripts/linux-installer.sh
+          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/linux-installer.sh
+          
+          # Process macos-installer.sh
+          cp scripts/macos-installer.sh pr-scripts/macos-installer.sh
+          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/macos-installer.sh
+          
+          # Process windows-installer.ps1
+          cp scripts/windows-installer.ps1 pr-scripts/windows-installer.ps1
+          sed -i 's/\$Script:Env = "[^"]*"/\$Script:Env = "dev"/' pr-scripts/windows-installer.ps1
+
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Deploy to PR directory
+        run: |
+          mkdir -p gh-pages/pr
+          cp pr-scripts/linux-installer.sh gh-pages/pr/
+          cp pr-scripts/macos-installer.sh gh-pages/pr/
+          cp pr-scripts/windows-installer.ps1 gh-pages/pr/
+          
+          cd gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pr/
+          git commit -m "Deploy PR #${{ steps.pr.outputs.number }} preview scripts" || echo "No changes to commit"
+          git push
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.pr.outputs.number }};
+            const repoUrl = 'https://outsystems.github.io/outsystems-hybrid-provision';
+            
+            const comment = `## 🚀 PR Preview Scripts Available
+            
+            Your installer scripts are now available with **dev** as the default environment:
+            
+            - **Linux**: \`${repoUrl}/pr/linux-installer.sh\`
+            - **macOS**: \`${repoUrl}/pr/macos-installer.sh\`
+            - **Windows**: \`${repoUrl}/pr/windows-installer.ps1\`
+            
+            ### Quick Install:
+            \`\`\`bash
+            # Linux/macOS
+            curl -fsSL ${repoUrl}/pr/linux-installer.sh | bash
+            
+            # Or with specific environment
+            curl -fsSL ${repoUrl}/pr/linux-installer.sh | bash -s -- <env>
+            \`\`\`
+            
+            \`\`\`powershell
+            # Windows
+            irm ${repoUrl}/pr/windows-installer.ps1 | iex
+            \`\`\`
+            
+            **Default Environment:** dev  
+            **Available Environments:** dev, test, ea, ga`;
+            
+            github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
