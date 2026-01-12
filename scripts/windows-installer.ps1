@@ -181,6 +181,12 @@ function Test-Arguments {
         }
     }
 
+    # Temporarily disable uninstall operation
+    if ($Script:Op -eq "uninstall") {
+        Write-LogError "The uninstall operation is currently unavailable. Please contact support for assistance with uninstallation."
+        return $false
+    }
+
     Write-LogSuccess "Operation '$Script:Op' is valid"
     return $true
 }
