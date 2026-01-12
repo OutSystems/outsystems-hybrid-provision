@@ -2,7 +2,7 @@
 
 param(
     [string]$version = $null,
-    [ValidateSet("ga", "ea", "test", "pre-test")]
+    [ValidateSet("ga", "ea", "test", "dev")]
     [string]$env = "ea",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
@@ -30,7 +30,7 @@ $Script:ImageName = "self-hosted-operator"
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
 $Script:EcrAliasEa = "g4u4y4x2/lab"    # EA ECR alias #m5i8c6m7/ea
 $Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
-$Script:EcrAliasLab = "g4u4y4x2/lab"   # Lab ECR alias (pre-test)
+$Script:EcrAliasDev = "g4u4y4x2/lab"   # Dev ECR alias
 $Script:PubRegistry = "public.ecr.aws"
 
 # Global variables
@@ -91,7 +91,7 @@ USAGE:
 OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
-    -env ENVIRONMENT        Environment: ga, ea, test, pre-test (default: pre-test)
+    -env ENVIRONMENT        Environment: ga, ea, test, dev (default: ea)
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
     -use-acr BOOLEAN        Use ACR registry: true, false (default: true)
                              [TEMPORARY: Backward compatibility for Azure ACR]
@@ -104,7 +104,7 @@ OPERATIONS:
     stop-port-forward        Stop port forwarding processes
 
 EXAMPLES:
-    # Install latest version in pre-test environment
+    # Install latest version in dev environment
     .\$Script:ScriptName
 
     # Install specific version in GA environment
@@ -128,7 +128,7 @@ function Test-Arguments {
 
     # Set Env to default if not provided
     if (-not $Script:Env) {
-        Write-LogInfo "No environment specified. Using default: pre-test"
+        Write-LogInfo "No environment specified. Using default: ea"
         $Script:Env = "ea"
     }
 
@@ -137,9 +137,9 @@ function Test-Arguments {
         "ga" { Write-LogSuccess "Environment 'ga' is valid" }
         "ea" { Write-LogSuccess "Environment 'ea' is valid" }
         "test" { Write-LogSuccess "Environment 'test' is valid" }
-        "pre-test" { Write-LogSuccess "Environment 'pre-test' is valid" }
+        "dev" { Write-LogSuccess "Environment 'dev' is valid" }
         default {
-            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, pre-test"
+            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, dev"
             return $false
         }
     }
@@ -208,12 +208,12 @@ function Initialize-Environment {
             $Script:EcrAlias = $Script:EcrAliasTest
             Write-LogInfo "Using Test ECR alias: $($Script:EcrAlias)"
         }
-        "pre-test" {
-            $Script:EcrAlias = $Script:EcrAliasLab
-            Write-LogInfo "Using Pre-Test (Lab) ECR alias: $($Script:EcrAlias)"
+        "dev" {
+            $Script:EcrAlias = $Script:EcrAliasDev
+            Write-LogInfo "Using Dev ECR alias: $($Script:EcrAlias)"
         }
         default {
-            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, pre-test"
+            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, dev"
             exit 1
         }
     }
@@ -585,7 +585,8 @@ function Install-Sho {
             "--set", "image.registry=$Script:PubRegistry/$Script:ImageRegistry",
             "--set", "image.repository=$Script:ImageName",
             "--set", "image.tag=v$Script:ShoVersion",
-            "--set-string", "podAnnotations.timestamp=$timestamp"
+            "--set-string", "podAnnotations.timestamp=$timestamp",
+            "--set-string", "podAnnotations.ring=$Script:Env"
         )
         
         if ($Script:UseAcr) {

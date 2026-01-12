@@ -18,7 +18,7 @@ DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
 ECR_ALIAS_EA="g4u4y4x2/lab"    # EA ECR alias #m5i8c6m7/ea
 ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
-ECR_ALIAS_LAB="g4u4y4x2/lab"  # Lab ECR alias (Pre-Test)
+ECR_ALIAS_DEV="g4u4y4x2/lab"  # Dev ECR alias
 PUB_REGISTRY="public.ecr.aws"
 
 # Global variables (set by parse_arguments)
@@ -112,11 +112,11 @@ validate_arguments() {
     fi
     # Validate environment
     case "$ENV" in
-        ga|ea|test|pre-test)
+        ga|ea|test|dev)
             log_success "Environment '$ENV' is valid"
             ;;
         *)
-            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, pre-test"
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, dev"
             return 1
             ;;
     esac
@@ -247,12 +247,12 @@ setup_environment() {
             ECR_ALIAS="$ECR_ALIAS_TEST"
             log_info "Using Test ECR alias: $ECR_ALIAS"
             ;;
-        pre-test)
-            ECR_ALIAS="$ECR_ALIAS_LAB"
-            log_info "Using Pre-Test (Lab) ECR alias: $ECR_ALIAS"
+        dev)
+            ECR_ALIAS="$ECR_ALIAS_DEV"
+            log_info "Using Dev ECR alias: $ECR_ALIAS"
             ;;
         *)
-            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, pre-test"
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, dev"
             exit 1
             ;;
     esac
@@ -535,6 +535,7 @@ sho_install() {
             --set "image.repository=${IMAGE_NAME}" \
             --set "image.tag=v${SHO_VERSION}" \
             --set-string "podAnnotations.timestamp=$timestamp" \
+            --set-string "podAnnotations.ring=$ENV" \
             --set "registry.url=${SH_REGISTRY}" \
             --set "registry.username=${SP_ID}" \
             --set "registry.password=${SP_SECRET}" \
@@ -546,7 +547,8 @@ sho_install() {
             --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
             --set "image.repository=${IMAGE_NAME}" \
             --set "image.tag=v${SHO_VERSION}" \
-            --set-string "podAnnotations.timestamp=$timestamp" 2>&1)
+            --set-string "podAnnotations.timestamp=$timestamp" \
+            --set-string "podAnnotations.ring=$ENV" 2>&1)
     fi
     
     if [[ $? -eq 0 ]]; then
