@@ -545,7 +545,7 @@ sho_install() {
             --set "image.repository=${IMAGE_NAME}" \
             --set "image.tag=v${SHO_VERSION}" \
             --set-string "podAnnotations.timestamp=$timestamp" \
-            --set-string "podAnnotations.ring=$ENV" \
+            --set "ring=$ENV" \
             --set "registry.url=${SH_REGISTRY}" \
             --set "registry.username=${SP_ID}" \
             --set "registry.password=${SP_SECRET}" \
@@ -558,7 +558,7 @@ sho_install() {
             --set "image.repository=${IMAGE_NAME}" \
             --set "image.tag=v${SHO_VERSION}" \
             --set-string "podAnnotations.timestamp=$timestamp" \
-            --set-string "podAnnotations.ring=$ENV" 2>&1)
+            --set "ring=$ENV" 2>&1)
     fi
     
     if [[ $? -eq 0 ]]; then

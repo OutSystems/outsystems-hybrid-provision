@@ -586,7 +586,7 @@ function Install-Sho {
             "--set", "image.repository=$Script:ImageName",
             "--set", "image.tag=v$Script:ShoVersion",
             "--set-string", "podAnnotations.timestamp=$timestamp",
-            "--set-string", "podAnnotations.ring=$Script:Env"
+            "--set", "ring=$Script:Env"
         )
         
         if ($Script:UseAcr) {
