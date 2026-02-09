@@ -13,6 +13,7 @@ IMAGE_NAME="self-hosted-operator"
 DEFAULT_ENV="ga" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
+DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
@@ -26,6 +27,7 @@ SHO_VERSION=""
 ENV="$DEFAULT_ENV"
 OPERATION="$DEFAULT_OPERATION"
 USE_ACR="$DEFAULT_USE_ACR"
+PEGASUS_ENABLED="$DEFAULT_PEGASUS_ENABLED"
 
 # Derived configuration (set by setup_environment)
 ECR_ALIAS=""
@@ -72,6 +74,8 @@ OPTIONS:
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
+    --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
+                              Note: Only supported in test environment
     --help, -h              Show this help message
 
 OPERATIONS:
@@ -146,6 +150,13 @@ validate_arguments() {
         log_success "Version '$SHO_VERSION' format is valid"
     fi
     
+    # Validate Pegasus configuration
+    if [[ "$PEGASUS_ENABLED" == "true" && "$ENV" != "test" ]]; then
+        log_error "Pegasus features (--pegasus-enabled=true) are only supported in 'test' environment"
+        log_info "Current environment: $ENV"
+        return 1
+    fi
+    
     # Validate ACR configuration only for install operation
     if [[ "$USE_ACR" == "true" ]]; then
         if [[ "$OPERATION" == "install" ]]; then
@@ -214,6 +225,23 @@ parse_arguments() {
                 # Support flag without value (defaults to true for backward compatibility)
                 USE_ACR="true"
                 log_info "ACR registry mode enabled"
+                ;;
+            --pegasus-enabled=*)
+                PEGASUS_ENABLED="${1#*=}"
+                # Normalize boolean values
+                case "$(echo "${PEGASUS_ENABLED}" | tr '[:upper:]' '[:lower:]')" in
+                    true|1|yes|on)
+                        PEGASUS_ENABLED="true"
+                        log_info "Pegasus features enabled"
+                        ;;
+                    false|0|no|off)
+                        PEGASUS_ENABLED="false"
+                        ;;
+                    *)
+                        log_error "Invalid value for --pegasus-enabled: '$PEGASUS_ENABLED'. Must be true or false"
+                        exit 1
+                        ;;
+                esac
                 ;;
             --help|-h)
                 show_usage
@@ -539,7 +567,8 @@ sho_install() {
             --set "registry.url=${SH_REGISTRY}" \
             --set "registry.username=${SP_ID}" \
             --set "registry.password=${SP_SECRET}" \
-            --set "enableECR.enabled=false" 2>&1)
+            --set "enableECR.enabled=false" \
+            --set "pegasusEnabled=$PEGASUS_ENABLED" 2>&1)
     else
         install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
             --namespace "$NAMESPACE" \
@@ -548,7 +577,8 @@ sho_install() {
             --set "image.repository=${IMAGE_NAME}" \
             --set "image.tag=v${SHO_VERSION}" \
             --set-string "podAnnotations.timestamp=$timestamp" \
-            --set "ring=$ENV" 2>&1)
+            --set "ring=$ENV" \
+            --set "pegasusEnabled=$PEGASUS_ENABLED" 2>&1)
     fi
     
     if [[ $? -eq 0 ]]; then

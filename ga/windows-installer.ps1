@@ -8,6 +8,8 @@ param(
     [string]$operation = "install",
     [ValidateSet("true", "false")]
     [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
+    [ValidateSet("true", "false")]
+    [string]$pegasus_enabled = "false",  # Enable Pegasus features
     [switch]$UseAcr,
     [Alias("h")]
     [switch]$help
@@ -38,6 +40,7 @@ $Script:ShoVersion = $version
 $Script:Env = $env
 $Script:Op = $operation
 $Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $false }
+$Script:PegasusEnabled = if ($pegasus_enabled -eq "true") { $true } else { $false }
 
 # Derived configuration
 $Script:EcrAlias = ""
@@ -95,6 +98,8 @@ OPTIONS:
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
     -use-acr BOOLEAN        Use ACR registry: true, false (default: true)
                              [TEMPORARY: Backward compatibility for Azure ACR]
+    -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
+                              Note: Only supported in test environment
     -help, -h               Show this help message
 
 OPERATIONS:
@@ -589,6 +594,13 @@ function Install-Sho {
             "--set", "ring=$Script:Env"
         )
         
+        # Validate Pegasus configuration
+        if ($Script:PegasusEnabled -and $Script:Env -ne "test") {
+            Write-LogError "Pegasus features (-pegasus_enabled true) are only supported in 'test' environment"
+            Write-LogInfo "Current environment: $Script:Env"
+            return $false
+        }
+        
         if ($Script:UseAcr) {
             Write-LogInfo "Installing with ACR registry configuration"
             $helmArgs += @(
@@ -598,6 +610,11 @@ function Install-Sho {
                 "--set", "enableECR.enabled=false"
             )
         }
+        
+        # Add pegasusEnabled to helm arguments
+        $helmArgs += @(
+            "--set", "pegasusEnabled=$($Script:PegasusEnabled.ToString().ToLower())"
+        )
         
         $installOutput = & helm $helmArgs 2>&1
         
