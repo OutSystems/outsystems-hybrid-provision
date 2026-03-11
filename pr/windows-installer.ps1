@@ -3,13 +3,15 @@
 param(
     [string]$version = $null,
     [ValidateSet("ga", "ea", "test", "dev")]
-    [string]$env = "ga",
+    [string]$env = "ea",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
     [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
     [ValidateSet("true", "false")]
     [string]$pegasus_enabled = "false",  # Enable Pegasus features
+    [ValidateSet("0", "1")]
+    [string]$kevents_replicas = "0",  # Number of Kevents replicas - Used to push Kubernetes events to Grafana
     [switch]$UseAcr,
     [Alias("h")]
     [switch]$help
@@ -30,9 +32,9 @@ $Script:ImageName = "self-hosted-operator"
 
 # Environment-specific settings
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
-$Script:EcrAliasEa = "m5i8c6m7/ea"    # EA ECR alias
+$Script:EcrAliasEa = "g4u4y4x2/lab"    # EA ECR alias #m5i8c6m7/ea
 $Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
-$Script:EcrAliasDev = "w0o4m8y0/dev"   # Dev ECR alias
+$Script:EcrAliasDev = "g4u4y4x2/lab"   # Dev ECR alias
 $Script:PubRegistry = "public.ecr.aws"
 
 # Global variables
@@ -41,6 +43,7 @@ $Script:Env = $env
 $Script:Op = $operation
 $Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $false }
 $Script:PegasusEnabled = if ($pegasus_enabled -eq "true") { $true } else { $false }
+$Script:KeventsReplicas = [int]$kevents_replicas
 
 # Derived configuration
 $Script:EcrAlias = ""
@@ -100,6 +103,7 @@ OPTIONS:
                              [TEMPORARY: Backward compatibility for Azure ACR]
     -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
+    -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
     -help, -h               Show this help message
 
 OPERATIONS:
@@ -613,7 +617,8 @@ function Install-Sho {
         
         # Add pegasusEnabled to helm arguments
         $helmArgs += @(
-            "--set", "pegasusEnabled=$($Script:PegasusEnabled.ToString().ToLower())"
+            "--set", "pegasusEnabled=$($Script:PegasusEnabled.ToString().ToLower())",
+            "--set", "keventsReplicas=$Script:KeventsReplicas"
         )
         
         $installOutput = & helm $helmArgs 2>&1
@@ -1075,7 +1080,7 @@ Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
 Image Registry: $Script:PubRegistry/$Script:ImageRegistry
 $(if ($Script:Op -eq 'install') {
-"Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr"
+"Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr`nKevents Replicas: $Script:KeventsReplicas"
 })
 
 "@
