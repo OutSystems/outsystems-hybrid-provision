@@ -18,9 +18,9 @@ DEFAULT_KEVENTS_REPLICAS="0"  # Number of Kevents replicas (0 or 1) - Used to pu
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
-ECR_ALIAS_EA="g4u4y4x2/lab"    # EA ECR alias #m5i8c6m7/ea
+ECR_ALIAS_EA="m5i8c6m7/ea"    # EA ECR alias
 ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
-ECR_ALIAS_DEV="g4u4y4x2/lab"  # Dev ECR alias
+ECR_ALIAS_DEV="w0o4m8y0/dev"  # Dev ECR alias
 PUB_REGISTRY="public.ecr.aws"
 
 # Global variables (set by parse_arguments)
