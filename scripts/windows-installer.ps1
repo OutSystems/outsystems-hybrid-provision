@@ -3,7 +3,7 @@
 param(
     [string]$version = $null,
     [ValidateSet("ga", "ea", "test", "dev")]
-    [string]$env = "ea",
+    [string]$env = "ga",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
@@ -30,7 +30,7 @@ $Script:ImageName = "self-hosted-operator"
 
 # Environment-specific settings
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
-$Script:EcrAliasEa = "g4u4y4x2/lab"    # EA ECR alias #m5i8c6m7/ea
+$Script:EcrAliasEa = "m5i8c6m7/ea"    # EA ECR alias
 $Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
 $Script:EcrAliasDev = "g4u4y4x2/lab"   # Dev ECR alias
 $Script:PubRegistry = "public.ecr.aws"
