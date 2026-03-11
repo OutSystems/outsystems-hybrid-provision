@@ -11,7 +11,7 @@ param(
     [ValidateSet("true", "false")]
     [string]$pegasus_enabled = "false",  # Enable Pegasus features
     [ValidateSet("0", "1")]
-    [string]$kevents_replicas = "1",  # Number of Kevents replicas - Used to push Kubernetes events to Grafana
+    [string]$kevents_replicas = "0",  # Number of Kevents replicas - Used to push Kubernetes events to Grafana
     [switch]$UseAcr,
     [Alias("h")]
     [switch]$help
@@ -103,7 +103,7 @@ OPTIONS:
                              [TEMPORARY: Backward compatibility for Azure ACR]
     -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
-    -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 1)
+    -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
     -help, -h               Show this help message
 
 OPERATIONS:

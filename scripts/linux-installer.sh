@@ -14,7 +14,7 @@ DEFAULT_ENV="ea" # Default environment as per the release state. Change this val
 DEFAULT_OPERATION="install"
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
-DEFAULT_KEVENTS_REPLICAS="1"  # Number of Kevents replicas (0 or 1) - Used to push Kubernetes events to Grafana
+DEFAULT_KEVENTS_REPLICAS="0"  # Number of Kevents replicas (0 or 1) - Used to push Kubernetes events to Grafana
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
@@ -78,7 +78,7 @@ OPTIONS:
                            [TEMPORARY: Backward compatibility for Azure ACR]
     --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
-    --kevents-replicas=NUMBER  Number of Kevents replicas: 0, 1 (default: 1)
+    --kevents-replicas=NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
     --help, -h              Show this help message
 
 OPERATIONS:
