@@ -14,6 +14,7 @@ DEFAULT_ENV="ga" # Default environment as per the release state. Change this val
 DEFAULT_OPERATION="install"
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
+DEFAULT_KEVENTS_REPLICAS="0"  # Number of Kevents replicas (0 or 1) - Used to push Kubernetes events to Grafana
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
@@ -28,6 +29,7 @@ ENV="$DEFAULT_ENV"
 OPERATION="$DEFAULT_OPERATION"
 USE_ACR="$DEFAULT_USE_ACR"
 PEGASUS_ENABLED="$DEFAULT_PEGASUS_ENABLED"
+KEVENTS_REPLICAS="$DEFAULT_KEVENTS_REPLICAS"
 
 # Derived configuration (set by setup_environment)
 ECR_ALIAS=""
@@ -79,6 +81,7 @@ OPTIONS:
                            [TEMPORARY: Backward compatibility for Azure ACR]
     --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
+    --kevents-replicas=NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
     --help, -h              Show this help message
 
 OPERATIONS:
@@ -158,6 +161,12 @@ validate_arguments() {
     if [[ "$PEGASUS_ENABLED" == "true" && "$ENV" != "test" ]]; then
         log_error "Pegasus features (--pegasus-enabled=true) are only supported in 'test' environment"
         log_info "Current environment: $ENV"
+        return 1
+    fi
+
+    # Validate Kevents replicas configuration
+    if [[ "$KEVENTS_REPLICAS" != "0" && "$KEVENTS_REPLICAS" != "1" ]]; then
+        log_error "Invalid value for kevents-replicas: '$KEVENTS_REPLICAS'. Must be 0 or 1"
         return 1
     fi
     
@@ -246,6 +255,14 @@ parse_arguments() {
                         exit 1
                         ;;
                 esac
+                ;;
+            --kevents-replicas=*)
+                KEVENTS_REPLICAS="${1#*=}"
+                if [[ "$KEVENTS_REPLICAS" != "0" && "$KEVENTS_REPLICAS" != "1" ]]; then
+                    log_error "Invalid value for --kevents-replicas: '$KEVENTS_REPLICAS'. Must be 0 or 1"
+                    exit 1
+                fi
+                log_info "Kevents replicas set to: $KEVENTS_REPLICAS"
                 ;;
             --help|-h)
                 show_usage
@@ -578,7 +595,8 @@ sho_install() {
             --set "registry.username=${SP_ID}" \
             --set "registry.password=${SP_SECRET}" \
             --set "enableECR.enabled=false" \
-            --set "pegasusEnabled=$PEGASUS_ENABLED" 2>&1)
+            --set "pegasusEnabled=$PEGASUS_ENABLED" \
+            --set "keventsReplicas=$KEVENTS_REPLICAS" 2>&1)
     else
         install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
             --namespace "$NAMESPACE" \
@@ -588,7 +606,8 @@ sho_install() {
             --set "image.tag=v${SHO_VERSION}" \
             --set-string "podAnnotations.timestamp=$timestamp" \
             --set "ring=$ENV" \
-            --set "pegasusEnabled=$PEGASUS_ENABLED" 2>&1)
+            --set "pegasusEnabled=$PEGASUS_ENABLED" \
+            --set "keventsReplicas=$KEVENTS_REPLICAS" 2>&1)
     fi
     
     if [[ $? -eq 0 ]]; then
@@ -892,6 +911,7 @@ show_configuration() {
     if [[ "$OPERATION" == "install" ]]; then
         echo "Version:        ${SHO_VERSION:-latest}"
         echo "Use ACR:        $USE_ACR"
+        echo "Kevents Replicas: $KEVENTS_REPLICAS"
     fi
     echo "Namespace:      $NAMESPACE"
     echo "Chart Name:     $CHART_NAME"
