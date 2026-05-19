@@ -42,7 +42,7 @@ jobs:
             
             # Process windows-installer.ps1
             cp scripts/windows-installer.ps1 "ring-scripts/$ring/windows-installer.ps1"
-            sed -i "s/\\\$Script:Env = \"[^\"]*\"/\\\$Script:Env = \"$ring\"/" "ring-scripts/$ring/windows-installer.ps1"
+            sed -i "s/\[string\]\$env = \"[^\"]*\"/[string]\$env = \"$ring\"/" "ring-scripts/$ring/windows-installer.ps1"
           done
 
       - name: Checkout gh-pages
