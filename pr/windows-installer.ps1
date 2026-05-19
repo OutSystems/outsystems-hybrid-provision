@@ -3,7 +3,7 @@
 param(
     [string]$version = $null,
     [ValidateSet("ga", "ea", "test", "dev")]
-    [string]$env = "ga",
+    [string]$env = "dev",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
@@ -138,7 +138,7 @@ function Test-Arguments {
     # Set Env to default if not provided
     if (-not $Script:Env) {
         Write-LogInfo "No environment specified. Using default: ea"
-        $Script:Env = "dev"
+        $Script:Env = "ea"
     }
 
     # Validate environment
