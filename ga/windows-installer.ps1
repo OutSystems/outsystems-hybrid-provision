@@ -138,7 +138,7 @@ function Test-Arguments {
     # Set Env to default if not provided
     if (-not $Script:Env) {
         Write-LogInfo "No environment specified. Using default: ea"
-        $Script:Env = "ga"
+        $Script:Env = "ea"
     }
 
     # Validate environment
