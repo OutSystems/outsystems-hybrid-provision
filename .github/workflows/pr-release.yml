@@ -36,7 +36,7 @@ jobs:
           
           # Process windows-installer.ps1
           cp scripts/windows-installer.ps1 pr-scripts/windows-installer.ps1
-          sed -i 's/\$Script:Env = "[^"]*"/\$Script:Env = "dev"/' pr-scripts/windows-installer.ps1
+          sed -i 's/\[string\]\$env = "[^"]*"/[string]\$env = "dev"/' pr-scripts/windows-installer.ps1
 
       - name: Checkout gh-pages
         uses: actions/checkout@v4
