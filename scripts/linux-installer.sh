@@ -15,6 +15,7 @@ DEFAULT_OPERATION="install"
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
 DEFAULT_KEVENTS_REPLICAS="0"  # Number of Kevents replicas (0 or 1) - Used to push Kubernetes events to Grafana
+DEFAULT_SH_MONITORING="false"  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
@@ -30,6 +31,7 @@ OPERATION="$DEFAULT_OPERATION"
 USE_ACR="$DEFAULT_USE_ACR"
 PEGASUS_ENABLED="$DEFAULT_PEGASUS_ENABLED"
 KEVENTS_REPLICAS="$DEFAULT_KEVENTS_REPLICAS"
+SH_MONITORING="$DEFAULT_SH_MONITORING"
 
 # Derived configuration (set by setup_environment)
 ECR_ALIAS=""
@@ -79,6 +81,8 @@ OPTIONS:
     --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
     --kevents-replicas=NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
+    --sh-monitoring=BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
+                              Note: Currently enabled only in the test cluster, where Pegasus is also enabled
     --help, -h              Show this help message
 
 OPERATIONS:
@@ -163,6 +167,12 @@ validate_arguments() {
     # Validate Kevents replicas configuration
     if [[ "$KEVENTS_REPLICAS" != "0" && "$KEVENTS_REPLICAS" != "1" ]]; then
         log_error "Invalid value for kevents-replicas: '$KEVENTS_REPLICAS'. Must be 0 or 1"
+        return 1
+    fi
+
+    # Validate SH monitoring configuration
+    if [[ "$SH_MONITORING" != "true" && "$SH_MONITORING" != "false" ]]; then
+        log_error "Invalid value for sh-monitoring: '$SH_MONITORING'. Must be true or false"
         return 1
     fi
     
@@ -259,6 +269,23 @@ parse_arguments() {
                     exit 1
                 fi
                 log_info "Kevents replicas set to: $KEVENTS_REPLICAS"
+                ;;
+            --sh-monitoring=*)
+                SH_MONITORING="${1#*=}"
+                # Normalize boolean values
+                case "$(echo "${SH_MONITORING}" | tr '[:upper:]' '[:lower:]')" in
+                    true|1|yes|on)
+                        SH_MONITORING="true"
+                        log_info "Self-hosted monitoring enabled"
+                        ;;
+                    false|0|no|off)
+                        SH_MONITORING="false"
+                        ;;
+                    *)
+                        log_error "Invalid value for --sh-monitoring: '$SH_MONITORING'. Must be true or false"
+                        exit 1
+                        ;;
+                esac
                 ;;
             --help|-h)
                 show_usage
@@ -586,7 +613,8 @@ sho_install() {
             --set "registry.password=${SP_SECRET}" \
             --set "enableECR.enabled=false" \
             --set "pegasusEnabled=$PEGASUS_ENABLED" \
-            --set "keventsReplicas=$KEVENTS_REPLICAS" 2>&1)
+            --set "keventsReplicas=$KEVENTS_REPLICAS" \
+            --set "shMonitoring=$SH_MONITORING" 2>&1)
     else
         install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
             --namespace "$NAMESPACE" \
@@ -597,7 +625,8 @@ sho_install() {
             --set-string "podAnnotations.timestamp=$timestamp" \
             --set "ring=$ENV" \
             --set "pegasusEnabled=$PEGASUS_ENABLED" \
-            --set "keventsReplicas=$KEVENTS_REPLICAS" 2>&1)
+            --set "keventsReplicas=$KEVENTS_REPLICAS" \
+            --set "shMonitoring=$SH_MONITORING" 2>&1)
     fi
     
     if [[ $? -eq 0 ]]; then
@@ -901,6 +930,7 @@ show_configuration() {
         echo "Version:        ${SHO_VERSION:-latest}"
         echo "Use ACR:        $USE_ACR"
         echo "Kevents Replicas: $KEVENTS_REPLICAS"
+        echo "SH Monitoring:  $SH_MONITORING"
     fi
     echo "Namespace:      $NAMESPACE"
     echo "Chart Name:     $CHART_NAME"

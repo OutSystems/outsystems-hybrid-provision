@@ -50,7 +50,7 @@ The Linux, macOS, and Windows scripts must stay functionally aligned. Any featur
 
 ### Script configuration pattern
 
-Each script defines its tunable defaults as variables at the top of the file (`DEFAULT_ENV`, `DEFAULT_OPERATION`, `DEFAULT_USE_ACR`, `DEFAULT_PEGASUS_ENABLED`, `DEFAULT_KEVENTS_REPLICAS`). CI pipelines modify `DEFAULT_ENV` via `sed` replacement to produce per-ring copies -- never hardcode ring-specific values in the source scripts.
+Each script defines its tunable defaults as variables at the top of the file (`DEFAULT_ENV`, `DEFAULT_OPERATION`, `DEFAULT_USE_ACR`, `DEFAULT_PEGASUS_ENABLED`, `DEFAULT_KEVENTS_REPLICAS`, `DEFAULT_SH_MONITORING`). CI pipelines modify `DEFAULT_ENV` via `sed` replacement to produce per-ring copies -- never hardcode ring-specific values in the source scripts.
 
 ### Logging functions
 
