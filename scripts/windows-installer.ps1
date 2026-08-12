@@ -39,6 +39,11 @@ $Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
 $Script:EcrAliasDev = "w0o4m8y0/dev"   # Dev ECR alias
 $Script:PubRegistry = "public.ecr.aws"
 
+# kubectl version configuration
+# kubectl version skew policy: supports ±1 minor version from cluster
+# Reference: https://kubernetes.io/releases/version-skew-policy/#kubectl
+$Script:KubectlVersion = "v1.34.0"  # Compatible with K8s 1.33-1.35
+
 # Global variables
 $Script:ShoVersion = $version
 $Script:Env = $env
@@ -310,21 +315,20 @@ function Install-Kubectl {
     } else {
         # Manual installation
         Write-LogInfo "Installing kubectl via direct download..."
-        
+
         try {
-            # Get latest version
-            $latestVersion = (Invoke-RestMethod -Uri "https://dl.k8s.io/release/stable.txt").Trim()
+            $latestVersion = $Script:KubectlVersion
             $downloadUrl = "https://dl.k8s.io/release/$latestVersion/bin/windows/amd64/kubectl.exe"
-            
+
             # Create directory if it doesn't exist
             $kubectlPath = "$env:ProgramFiles\kubectl"
             if (-not (Test-Path $kubectlPath)) {
                 New-Item -ItemType Directory -Path $kubectlPath -Force | Out-Null
             }
-            
+
             # Download kubectl
             $kubectlExe = "$kubectlPath\kubectl.exe"
-            Write-LogInfo "Downloading kubectl $latestVersion..."
+            Write-LogInfo "Downloading kubectl $latestVersion (compatible with K8s 1.33-1.35)..."
             Invoke-WebRequest -Uri $downloadUrl -OutFile $kubectlExe
             
             # Add to PATH if not already there
