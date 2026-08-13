@@ -24,6 +24,11 @@ ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
 ECR_ALIAS_DEV="w0o4m8y0/dev"  # Dev ECR alias
 PUB_REGISTRY="public.ecr.aws"
 
+# kubectl version configuration
+# kubectl version skew policy: supports ±1 minor version from cluster
+# Reference: https://kubernetes.io/releases/version-skew-policy/#kubectl
+KUBECTL_VERSION="v1.34.0"  # Compatible with K8s 1.33-1.35
+
 # Global variables (set by parse_arguments)
 SHO_VERSION=""
 ENV="$DEFAULT_ENV"
@@ -370,16 +375,10 @@ install_kubectl() {
         brew install kubectl
     else
         log_info "Installing kubectl via direct download..."
-        # Get the latest stable version
         local version
-        version=$(curl -L -s https://dl.k8s.io/release/stable.txt)
-        
-        if [[ -z "$version" ]]; then
-            log_error "Failed to get kubectl version"
-            return 1
-        fi
-        
-        log_info "Downloading kubectl $version..."
+        version="$KUBECTL_VERSION"
+
+        log_info "Downloading kubectl $version (compatible with K8s 1.33-1.35)..."
         curl -LO "https://dl.k8s.io/release/$version/bin/darwin/amd64/kubectl"
         chmod +x kubectl
         
