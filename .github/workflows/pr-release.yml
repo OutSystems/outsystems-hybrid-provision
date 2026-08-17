@@ -87,8 +87,8 @@ jobs:
             irm ${repoUrl}/pr/windows-installer.ps1 | iex
             \`\`\`
             
-            **Default Environment:** dev  
-            **Available Environments:** dev, test, ea, ga`;
+            **Default Environment:** dev
+            **Available Environments:** dev, test, stage, ea, ga`;
             
             github.rest.issues.createComment({
               issue_number: prNumber,
