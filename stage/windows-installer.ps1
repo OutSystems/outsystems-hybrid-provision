@@ -3,7 +3,7 @@
 param(
     [string]$version = $null,
     [ValidateSet("ga", "ea", "test", "stage", "dev")]
-    [string]$env = "ga",
+    [string]$env = "stage",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]

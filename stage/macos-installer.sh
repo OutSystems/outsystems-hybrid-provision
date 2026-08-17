@@ -3,14 +3,14 @@
 set -e
 
 # Script Configuration
-SCRIPT_NAME="linux-installer.sh"
+SCRIPT_NAME="macos-installer.sh"
 SCRIPT_VERSION="1.0.0"
 
 # Default Configuration
 NAMESPACE="self-hosted-operator"
 CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
-DEFAULT_ENV="dev" # Default environment as per the release state. Change this value as release progress.
+DEFAULT_ENV="stage" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
@@ -76,7 +76,10 @@ log_step() {
 # Function to show usage
 show_usage() {
     cat << EOF
-${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for Linux
+${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for macOS
+
+USAGE:
+    ${SCRIPT_NAME} [OPTIONS]
 
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
@@ -160,6 +163,7 @@ validate_arguments() {
             log_error "Invalid version format: '$SHO_VERSION'. Expected format: x.y.z (e.g., 0.2.3)"
             return 1
         fi
+        
         log_success "Version '$SHO_VERSION' format is valid"
     fi
     
@@ -181,7 +185,7 @@ validate_arguments() {
         log_error "Invalid value for sh-monitoring: '$SH_MONITORING'. Must be true or false"
         return 1
     fi
-    
+
     # Validate ACR configuration only for install operation
     if [[ "$USE_ACR" == "true" ]]; then
         if [[ "$OPERATION" == "install" ]]; then
@@ -353,39 +357,34 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to install package using Linux package managers
-install_package() {
+# Function to install package using Homebrew
+install_package_homebrew() {
     local package="$1"
     
-    log_step "Installing $package..."
+    log_step "Installing $package via Homebrew..."
     
-    if command_exists apt-get; then
-        sudo apt-get update && sudo apt-get install -y "$package"
-    elif command_exists yum; then
-        sudo yum install -y "$package"
-    elif command_exists dnf; then
-        sudo dnf install -y "$package"
-    elif command_exists pacman; then
-        sudo pacman -S --noconfirm "$package"
-    elif command_exists zypper; then
-        sudo zypper install -y "$package"
-    else
-        log_error "No supported package manager found. Please install $package manually."
+    if ! command_exists brew; then
+        log_error "Homebrew not found. Please install Homebrew first: https://brew.sh"
         return 1
     fi
+    
+    brew install "$package"
 }
 
 # Function to install kubectl
 install_kubectl() {
     log_step "Installing kubectl..."
-
-    local version
-    version="$KUBECTL_VERSION"
-
-    log_info "Downloading kubectl $version (compatible with K8s 1.33-1.35)..."
     
-    # Download kubectl binary for Linux
-    if curl -LO "https://dl.k8s.io/release/$version/bin/linux/amd64/kubectl"; then
+    if command_exists brew; then
+        log_info "Installing kubectl via Homebrew..."
+        brew install kubectl
+    else
+        log_info "Installing kubectl via direct download..."
+        local version
+        version="$KUBECTL_VERSION"
+
+        log_info "Downloading kubectl $version (compatible with K8s 1.33-1.35)..."
+        curl -LO "https://dl.k8s.io/release/$version/bin/darwin/amd64/kubectl"
         chmod +x kubectl
         
         # Try to move to system PATH
@@ -399,17 +398,14 @@ install_kubectl() {
             log_error "Failed to install kubectl to system PATH"
             return 1
         fi
-        
-        # Verify installation
-        if command_exists kubectl; then
-            log_success "kubectl installed successfully"
-            return 0
-        else
-            log_error "kubectl installation verification failed"
-            return 1
-        fi
+    fi
+    
+    # Verify installation
+    if command_exists kubectl; then
+        log_success "kubectl installed successfully"
+        return 0
     else
-        log_error "Failed to download kubectl"
+        log_error "kubectl installation failed"
         return 1
     fi
 }
@@ -418,11 +414,17 @@ install_kubectl() {
 install_helm() {
     log_step "Installing Helm..."
     
-    # Use official Helm installation script
-    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-    chmod 700 get_helm.sh
-    ./get_helm.sh
-    rm -f get_helm.sh
+    if command_exists brew; then
+        log_info "Installing Helm via Homebrew..."
+        brew install helm
+    else
+        log_info "Installing Helm via official script..."
+        # Use official Helm installation script
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm -f get_helm.sh
+    fi
     
     if command_exists helm; then
         log_success "Helm installed successfully"
@@ -436,23 +438,31 @@ install_helm() {
 
 # Function to check dependencies
 check_dependencies() {
-    log_step "Checking dependencies for Linux..."
+    log_step "Checking dependencies for macOS..."
     local all_deps_ok=true
+    
+    # Check if Homebrew is available
+    if command_exists brew; then
+        log_success "Homebrew is available"
+    else
+        log_warning "Homebrew not found. Some installations may fall back to manual methods."
+        log_info "For best experience, install Homebrew from: https://brew.sh"
+    fi
     
     # Check jq
     if ! command_exists jq; then
         log_warning "jq not found. Installing..."
-        if ! install_package jq; then
+        if ! install_package_homebrew jq; then
             all_deps_ok=false
         fi
     else
         log_success "jq is installed"
     fi
     
-    # Check curl
+    # Check curl (usually pre-installed on macOS)
     if ! command_exists curl; then
         log_warning "curl not found. Installing..."
-        if ! install_package curl; then
+        if ! install_package_homebrew curl; then
             all_deps_ok=false
         fi
     else
@@ -567,10 +577,10 @@ sho_install() {
     
     # Enable OCI mode for Helm
     export HELM_EXPERIMENTAL_OCI=1
-
+    
     # Logout from ECR public registry to avoid stale credentials
     logout_ecr_public
-    
+
     # Pull chart to temp directory
     local chart_oci="oci://${PUB_REGISTRY}/${CHART_REPOSITORY}"
     local tmpdir
@@ -796,12 +806,12 @@ test_url_accessible() {
     return 1
 }
 
-# Function to open browser (Linux)
+# Function to open browser (macOS)
 open_browser() {
     local url="$1"
     
-    if command_exists xdg-open; then
-        xdg-open "$url"
+    if command_exists open; then
+        open "$url"
         log_success "Browser opened"
     else
         log_info "Please open the URL manually: $url"
@@ -820,8 +830,8 @@ sho_uninstall() {
     log_info "Release: $CHART_NAME"
     log_info "Namespace: $NAMESPACE"
     echo
-    read -p "Are you sure you want to proceed? (y/n): " -r confirm
-    
+    echo -n "Are you sure you want to proceed? (y/n): "
+    read -r confirm
     if [[ ! "$confirm" =~ ^(yes|y)$ ]]; then
         log_info "Uninstallation cancelled"
         exit 0
@@ -856,7 +866,8 @@ sho_uninstall() {
         log_success "SHO release uninstalled successfully"
         
         # Optional: Delete namespace
-        read -p "Do you want to delete the namespace '$NAMESPACE'? (y/n): " -r delete_ns
+        echo -n "Do you want to delete the namespace '$NAMESPACE'? (y/n): "
+        read -r delete_ns
         if [[ "$delete_ns" =~ ^(yes|y)$ ]]; then
             kubectl delete namespace "$NAMESPACE" --wait=false || true
             log_info "Namespace deletion initiated"
@@ -945,7 +956,7 @@ show_configuration() {
 
 # Main function
 main() {
-    echo "🐧 OutSystems Self-Hosted Operator Linux Installer v${SCRIPT_VERSION}"
+    echo "🍎 OutSystems Self-Hosted Operator macOS Installer v${SCRIPT_VERSION}"
     echo
     
     # Parse command line arguments
@@ -958,13 +969,13 @@ main() {
     
     # Setup environment
     setup_environment
-
+    
     # Check dependencies
     if ! check_dependencies; then
         log_error "Dependency check failed. Please resolve issues and try again."
         exit 1
     fi
-    
+
     # For install operation, get version if not specified before showing configuration
     if [[ "$OPERATION" == "install" ]]; then
         if [[ -z "$SHO_VERSION" || "$SHO_VERSION" == "latest" ]]; then
@@ -974,7 +985,7 @@ main() {
             fi
         fi
     fi
-    
+
     # Show configuration
     show_configuration
     
