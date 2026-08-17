@@ -2,7 +2,7 @@
 
 param(
     [string]$version = $null,
-    [ValidateSet("ga", "ea", "test", "dev")]
+    [ValidateSet("ga", "ea", "test", "stage", "dev")]
     [string]$env = "dev",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
@@ -36,6 +36,7 @@ $Script:ImageName = "self-hosted-operator"
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
 $Script:EcrAliasEa = "m5i8c6m7/ea"    # EA ECR alias
 $Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
+$Script:EcrAliasStage = "<STAGE_ECR_ALIAS>"  # Stage ECR alias (TODO: Replace with actual value)
 $Script:EcrAliasDev = "w0o4m8y0/dev"   # Dev ECR alias
 $Script:PubRegistry = "public.ecr.aws"
 
@@ -105,7 +106,7 @@ USAGE:
 OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
-    -env ENVIRONMENT        Environment: ga, ea, test, dev (default: ea)
+    -env ENVIRONMENT        Environment: dev, test, stage, ea, ga (default: ea)
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
     -use-acr BOOLEAN        Use ACR registry: true, false (default: true)
                              [TEMPORARY: Backward compatibility for Azure ACR]
@@ -156,9 +157,10 @@ function Test-Arguments {
         "ga" { Write-LogSuccess "Environment 'ga' is valid" }
         "ea" { Write-LogSuccess "Environment 'ea' is valid" }
         "test" { Write-LogSuccess "Environment 'test' is valid" }
+        "stage" { Write-LogSuccess "Environment 'stage' is valid" }
         "dev" { Write-LogSuccess "Environment 'dev' is valid" }
         default {
-            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, dev"
+            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, stage, dev"
             return $false
         }
     }
@@ -227,12 +229,16 @@ function Initialize-Environment {
             $Script:EcrAlias = $Script:EcrAliasTest
             Write-LogInfo "Using Test ECR alias: $($Script:EcrAlias)"
         }
+        "stage" {
+            $Script:EcrAlias = $Script:EcrAliasStage
+            Write-LogInfo "Using Stage ECR alias: $($Script:EcrAlias)"
+        }
         "dev" {
             $Script:EcrAlias = $Script:EcrAliasDev
             Write-LogInfo "Using Dev ECR alias: $($Script:EcrAlias)"
         }
         default {
-            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, dev"
+            Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, stage, dev"
             exit 1
         }
     }
