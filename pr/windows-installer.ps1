@@ -36,7 +36,7 @@ $Script:ImageName = "self-hosted-operator"
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
 $Script:EcrAliasEa = "m5i8c6m7/ea"    # EA ECR alias
 $Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
-$Script:EcrAliasStage = "<STAGE_ECR_ALIAS>"  # Stage ECR alias (TODO: Replace with actual value)
+$Script:EcrAliasStage = "u5a4o8b8/stage"  # Stage ECR alias
 $Script:EcrAliasDev = "w0o4m8y0/dev"   # Dev ECR alias
 $Script:PubRegistry = "public.ecr.aws"
 

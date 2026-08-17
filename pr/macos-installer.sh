@@ -21,7 +21,7 @@ DEFAULT_SH_MONITORING="false"  # Enable self-hosted monitoring alerts - Currentl
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
 ECR_ALIAS_EA="m5i8c6m7/ea"    # EA ECR alias
 ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
-ECR_ALIAS_STAGE="<STAGE_ECR_ALIAS>"  # Stage ECR alias (TODO: Replace with actual value)
+ECR_ALIAS_STAGE="u5a4o8b8/stage"  # Stage ECR alias
 ECR_ALIAS_DEV="w0o4m8y0/dev"  # Dev ECR alias
 PUB_REGISTRY="public.ecr.aws"
 
