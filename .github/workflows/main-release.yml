@@ -26,7 +26,7 @@ jobs:
 
       - name: Prepare ring-specific scripts
         run: |
-          RINGS=("dev" "test" "ea" "ga")
+          RINGS=("dev" "test" "stage" "ea" "ga")
           
           for ring in "${RINGS[@]}"; do
             echo "Processing ring: $ring"
@@ -53,7 +53,7 @@ jobs:
 
       - name: Deploy to ring directories
         run: |
-          RINGS=("dev" "test" "ea" "ga")
+          RINGS=("dev" "test" "stage" "ea" "ga")
           
           for ring in "${RINGS[@]}"; do
             echo "Deploying $ring ring"
@@ -124,7 +124,16 @@ jobs:
                       <li><a href="./test/windows-installer.ps1">windows-installer.ps1</a></li>
                   </ul>
               </div>
-              
+
+              <div class="ring">
+                  <h2>🟠 Stage</h2>
+                  <ul class="script-list">
+                      <li><a href="./stage/linux-installer.sh">linux-installer.sh</a></li>
+                      <li><a href="./stage/macos-installer.sh">macos-installer.sh</a></li>
+                      <li><a href="./stage/windows-installer.ps1">windows-installer.ps1</a></li>
+                  </ul>
+              </div>
+
               <div class="ring">
                   <h2>🟡 Early Access (ea)</h2>
                   <ul class="script-list">
@@ -185,6 +194,7 @@ jobs:
             ### Available Rings:
             - **dev**: https://outsystems.github.io/outsystems-hybrid-provision/dev/
             - **test**: https://outsystems.github.io/outsystems-hybrid-provision/test/
+            - **stage**: https://outsystems.github.io/outsystems-hybrid-provision/stage/
             - **ea**: https://outsystems.github.io/outsystems-hybrid-provision/ea/
             - **ga**: https://outsystems.github.io/outsystems-hybrid-provision/ga/
             

@@ -80,7 +80,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Linux/macOS Options
 ```bash
 --version=VERSION        # SHO version to install/manage (default: latest)
---env=ENVIRONMENT       # Environment: test, ea, ga (default: ga)
+--env=ENVIRONMENT       # Environment: dev, test, stage, ea, ga (default: ga)
 --operation=OPERATION   # Operation: install, uninstall, get-console-url (default: install)
 --help, -h              # Show help message
 ```
@@ -88,7 +88,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Windows PowerShell Options
 ```powershell
 --version=VERSION        # SHO version to install/manage (default: latest)
---env=ENVIRONMENT       # Environment: test, ea, ga (default: ga)
+--env=ENVIRONMENT       # Environment: dev, test, stage, ea, ga (default: ga)
 --operation=OPERATION   # Operation: install, uninstall, get-console-url (default: install)
 --help, -h              # Show help message
 ```

@@ -21,6 +21,7 @@ DEFAULT_SH_MONITORING="false"  # Enable self-hosted monitoring alerts - Currentl
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
 ECR_ALIAS_EA="m5i8c6m7/ea"    # EA ECR alias
 ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
+ECR_ALIAS_STAGE="u5a4o8b8/stage"  # Stage ECR alias
 ECR_ALIAS_DEV="w0o4m8y0/dev"  # Dev ECR alias
 PUB_REGISTRY="public.ecr.aws"
 
@@ -82,7 +83,7 @@ USAGE:
 
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
-    --env=ENVIRONMENT       Environment: test, ea, ga (default: ga)
+    --env=ENVIRONMENT       Environment: dev, test, stage, ea, ga (default: ga)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
@@ -131,11 +132,11 @@ validate_arguments() {
     fi
     # Validate environment
     case "$ENV" in
-        ga|ea|test|dev)
+        ga|ea|stage|test|dev)
             log_success "Environment '$ENV' is valid"
             ;;
         *)
-            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, dev"
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
             return 1
             ;;
     esac
@@ -328,12 +329,16 @@ setup_environment() {
             ECR_ALIAS="$ECR_ALIAS_TEST"
             log_info "Using Test ECR alias: $ECR_ALIAS"
             ;;
+        stage)
+            ECR_ALIAS="$ECR_ALIAS_STAGE"
+            log_info "Using Stage ECR alias: $ECR_ALIAS"
+            ;;
         dev)
             ECR_ALIAS="$ECR_ALIAS_DEV"
             log_info "Using Dev ECR alias: $ECR_ALIAS"
             ;;
         *)
-            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, test, dev"
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
             exit 1
             ;;
     esac
