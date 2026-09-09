@@ -1,4 +1,8 @@
 # outsystems-hybrid-provision
+
+![Status](https://img.shields.io/badge/status-production-brightgreen)
+[![Architecture](https://img.shields.io/badge/docs-architecture-blue)](ARCHITECTURE.md)
+[![Contributing](https://img.shields.io/badge/docs-contributing-blue)](CONTRIBUTING.md)
 Self hosted version of ODC
 
 
