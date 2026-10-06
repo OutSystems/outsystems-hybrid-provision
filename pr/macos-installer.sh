@@ -628,7 +628,8 @@ sho_install() {
             --set "enableECR.enabled=false" \
             --set "pegasusEnabled=$PEGASUS_ENABLED" \
             --set "keventsReplicas=$KEVENTS_REPLICAS" \
-            --set "shMonitoring=$SH_MONITORING" 2>&1)
+            --set "shMonitoring=$SH_MONITORING" \
+            --set-json "imagePullSecrets=[]" 2>&1)
     else
         install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
             --namespace "$NAMESPACE" \
@@ -640,8 +641,15 @@ sho_install() {
             --set "ring=$ENV" \
             --set "pegasusEnabled=$PEGASUS_ENABLED" \
             --set "keventsReplicas=$KEVENTS_REPLICAS" \
-            --set "shMonitoring=$SH_MONITORING" 2>&1)
+            --set "shMonitoring=$SH_MONITORING" \
+            --set-json "imagePullSecrets=[]" 2>&1)
     fi
+    # The operator image above is always pulled from the public ECR mirror,
+    # which needs no credentials -- the chart's default imagePullSecrets
+    # (ecr-pull-secrets) is meant for our internal private-ECR deployments
+    # and doesn't apply here (ACR or not). Left unset, it causes a recurring
+    # (but otherwise harmless) kubelet warning: "Unable to retrieve some
+    # image pull secrets (ecr-pull-secrets)".
     
     if [[ $? -eq 0 ]]; then
         log_success "OutSystems Self-Hosted Operator installed successfully!"
