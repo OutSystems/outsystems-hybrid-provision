@@ -610,7 +610,14 @@ function Install-Sho {
             "--set", "image.repository=$Script:ImageName",
             "--set", "image.tag=v$Script:ShoVersion",
             "--set-string", "podAnnotations.timestamp=$timestamp",
-            "--set", "ring=$Script:Env"
+            "--set", "ring=$Script:Env",
+            # The operator image above is always pulled from the public ECR
+            # mirror, which needs no credentials -- the chart's default
+            # imagePullSecrets (ecr-pull-secrets) is meant for our internal
+            # private-ECR deployments and doesn't apply here. Left unset, it
+            # causes a recurring (but otherwise harmless) kubelet warning:
+            # "Unable to retrieve some image pull secrets (ecr-pull-secrets)".
+            "--set-json", "imagePullSecrets=[]"
         )
         
         # Validate Pegasus configuration
