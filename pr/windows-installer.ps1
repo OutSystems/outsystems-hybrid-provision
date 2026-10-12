@@ -2,8 +2,6 @@
 
 param(
     [string]$version = $null,
-    [ValidateSet("ga", "ea", "test", "stage", "dev")]
-    [string]$env = "dev",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
@@ -31,6 +29,7 @@ $Script:ScriptVersion = "1.0.0"
 $Script:Namespace = "self-hosted-operator"
 $Script:ChartName = "self-hosted-operator"
 $Script:ImageName = "self-hosted-operator"
+$Script:DefaultEnv = "dev" # Default environment as per the release state. Change this value as release progress.
 
 # Environment-specific settings
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
@@ -47,7 +46,7 @@ $Script:KubectlVersion = "v1.34.0"  # Compatible with K8s 1.33-1.35
 
 # Global variables
 $Script:ShoVersion = $version
-$Script:Env = $env
+$Script:Env = $Script:DefaultEnv
 $Script:Op = $operation
 $Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $false }
 $Script:PegasusEnabled = if ($pegasus_enabled -eq "true") { $true } else { $false }
@@ -106,9 +105,8 @@ USAGE:
 OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
-    -env ENVIRONMENT        Environment: dev, test, stage, ea, ga (default: ea)
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
-    -use-acr BOOLEAN        Use ACR registry: true, false (default: true)
+    -use-acr BOOLEAN        Use ACR registry: true, false (default: false)
                              [TEMPORARY: Backward compatibility for Azure ACR]
     -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
@@ -124,20 +122,17 @@ OPERATIONS:
     stop-port-forward        Stop port forwarding processes
 
 EXAMPLES:
-    # Install latest version in dev environment
+    # Install latest version
     .\$Script:ScriptName
 
-    # Install specific version in GA environment
-    .\$Script:ScriptName -operation install -version 0.2.3 -env ga
+    # Install specific version
+    .\$Script:ScriptName -operation install -version 0.2.3
 
-    # Alternative PowerShell syntax (also supported)
-    .\$Script:ScriptName -operation install -version 0.2.3 -env ga
+    # Get console URL
+    .\$Script:ScriptName -operation get-console-url
 
-    # Get console URL for EA environment
-    .\$Script:ScriptName -operation get-console-url -env ea
-
-    # Uninstall from test environment
-    .\$Script:ScriptName -operation uninstall -env test
+    # Uninstall
+    .\$Script:ScriptName -operation uninstall
 
 "@
 }
@@ -145,12 +140,6 @@ EXAMPLES:
 # Function to validate arguments
 function Test-Arguments {
     Write-LogStep "Validating arguments..."
-
-    # Set Env to default if not provided
-    if (-not $Script:Env) {
-        Write-LogInfo "No environment specified. Using default: ea"
-        $Script:Env = "ea"
-    }
 
     # Validate environment
     switch ($Script:Env) {
@@ -610,14 +599,7 @@ function Install-Sho {
             "--set", "image.repository=$Script:ImageName",
             "--set", "image.tag=v$Script:ShoVersion",
             "--set-string", "podAnnotations.timestamp=$timestamp",
-            "--set", "ring=$Script:Env",
-            # The operator image above is always pulled from the public ECR
-            # mirror, which needs no credentials -- the chart's default
-            # imagePullSecrets (ecr-pull-secrets) is meant for our internal
-            # private-ECR deployments and doesn't apply here. Left unset, it
-            # causes a recurring (but otherwise harmless) kubelet warning:
-            # "Unable to retrieve some image pull secrets (ecr-pull-secrets)".
-            "--set-json", "imagePullSecrets=[]"
+            "--set", "ring=$Script:Env"
         )
         
         # Validate Pegasus configuration
