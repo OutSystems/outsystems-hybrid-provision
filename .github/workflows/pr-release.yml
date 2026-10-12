@@ -36,7 +36,7 @@ jobs:
           
           # Process windows-installer.ps1
           cp scripts/windows-installer.ps1 pr-scripts/windows-installer.ps1
-          sed -i 's/\[string\]\$env = "[^"]*"/[string]\$env = "dev"/' pr-scripts/windows-installer.ps1
+          sed -i 's/\$Script:DefaultEnv = "[^"]*"/$Script:DefaultEnv = "dev"/' pr-scripts/windows-installer.ps1
 
       - name: Checkout gh-pages
         uses: actions/checkout@v4
@@ -77,18 +77,14 @@ jobs:
             \`\`\`bash
             # Linux/macOS
             curl -fsSL ${repoUrl}/pr/linux-installer.sh | bash
-            
-            # Or with specific environment
-            curl -fsSL ${repoUrl}/pr/linux-installer.sh | bash -s -- <env>
             \`\`\`
-            
+
             \`\`\`powershell
             # Windows
             irm ${repoUrl}/pr/windows-installer.ps1 | iex
             \`\`\`
-            
-            **Default Environment:** dev
-            **Available Environments:** dev, test, stage, ea, ga`;
+
+            **Default Environment:** dev`;
             
             github.rest.issues.createComment({
               issue_number: prNumber,
