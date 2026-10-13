@@ -1,5 +1,6 @@
 #Requires -Version 5.1
 
+[CmdletBinding()]
 param(
     [string]$version = $null,
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
@@ -14,7 +15,13 @@ param(
     [string]$sh_monitoring = "false",  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
     [switch]$UseAcr,
     [Alias("h")]
-    [switch]$help
+    [switch]$help,
+    # Without CmdletBinding, PowerShell's "simple" binding silently absorbs an unrecognized
+    # named argument (e.g. the removed -env) into the unused $args array instead of erroring --
+    # unlike bash/macOS, which reject it with "Unknown option" and exit 1. This catch-all plus
+    # the check in Main gives Windows the same loud rejection instead of silently ignoring it.
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$UnknownArgs
 )
 
 # Script Configuration
@@ -1095,7 +1102,13 @@ $(if ($Script:Op -eq 'install') {
 function Main {
     Write-Host "OutSystems Self-Hosted Operator Windows Installer v$Script:ScriptVersion" -ForegroundColor $Script:Colors.Blue
     Write-Host ""
-    
+
+    # Reject unrecognized options instead of silently ignoring them (parity with bash/macOS)
+    if ($UnknownArgs -and $UnknownArgs.Count -gt 0) {
+        Write-LogError "Unknown option: $($UnknownArgs[0])"
+        exit 1
+    }
+
     # Show help if requested
     if ($help) {
         Show-Usage
