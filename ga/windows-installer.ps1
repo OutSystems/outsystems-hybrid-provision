@@ -1,9 +1,8 @@
 #Requires -Version 5.1
 
+[CmdletBinding()]
 param(
     [string]$version = $null,
-    [ValidateSet("ga", "ea", "test", "stage", "dev")]
-    [string]$env = "ga",
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
@@ -16,7 +15,13 @@ param(
     [string]$sh_monitoring = "false",  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
     [switch]$UseAcr,
     [Alias("h")]
-    [switch]$help
+    [switch]$help,
+    # Without CmdletBinding, PowerShell's "simple" binding silently absorbs an unrecognized
+    # named argument (e.g. the removed -env) into the unused $args array instead of erroring --
+    # unlike bash/macOS, which reject it with "Unknown option" and exit 1. This catch-all plus
+    # the check in Main gives Windows the same loud rejection instead of silently ignoring it.
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$UnknownArgs
 )
 
 # Script Configuration
@@ -31,6 +36,7 @@ $Script:ScriptVersion = "1.0.0"
 $Script:Namespace = "self-hosted-operator"
 $Script:ChartName = "self-hosted-operator"
 $Script:ImageName = "self-hosted-operator"
+$Script:DefaultEnv = "ga" # Default environment as per the release state. Change this value as release progress.
 
 # Environment-specific settings
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
@@ -47,7 +53,7 @@ $Script:KubectlVersion = "v1.34.0"  # Compatible with K8s 1.33-1.35
 
 # Global variables
 $Script:ShoVersion = $version
-$Script:Env = $env
+$Script:Env = $Script:DefaultEnv
 $Script:Op = $operation
 $Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $false }
 $Script:PegasusEnabled = if ($pegasus_enabled -eq "true") { $true } else { $false }
@@ -106,9 +112,8 @@ USAGE:
 OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
-    -env ENVIRONMENT        Environment: dev, test, stage, ea, ga (default: ea)
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
-    -use-acr BOOLEAN        Use ACR registry: true, false (default: true)
+    -use-acr BOOLEAN        Use ACR registry: true, false (default: false)
                              [TEMPORARY: Backward compatibility for Azure ACR]
     -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
@@ -124,20 +129,17 @@ OPERATIONS:
     stop-port-forward        Stop port forwarding processes
 
 EXAMPLES:
-    # Install latest version in dev environment
+    # Install latest version
     .\$Script:ScriptName
 
-    # Install specific version in GA environment
-    .\$Script:ScriptName -operation install -version 0.2.3 -env ga
+    # Install specific version
+    .\$Script:ScriptName -operation install -version 0.2.3
 
-    # Alternative PowerShell syntax (also supported)
-    .\$Script:ScriptName -operation install -version 0.2.3 -env ga
+    # Get console URL
+    .\$Script:ScriptName -operation get-console-url
 
-    # Get console URL for EA environment
-    .\$Script:ScriptName -operation get-console-url -env ea
-
-    # Uninstall from test environment
-    .\$Script:ScriptName -operation uninstall -env test
+    # Uninstall
+    .\$Script:ScriptName -operation uninstall
 
 "@
 }
@@ -145,12 +147,6 @@ EXAMPLES:
 # Function to validate arguments
 function Test-Arguments {
     Write-LogStep "Validating arguments..."
-
-    # Set Env to default if not provided
-    if (-not $Script:Env) {
-        Write-LogInfo "No environment specified. Using default: ea"
-        $Script:Env = "ea"
-    }
 
     # Validate environment
     switch ($Script:Env) {
@@ -1106,7 +1102,13 @@ $(if ($Script:Op -eq 'install') {
 function Main {
     Write-Host "OutSystems Self-Hosted Operator Windows Installer v$Script:ScriptVersion" -ForegroundColor $Script:Colors.Blue
     Write-Host ""
-    
+
+    # Reject unrecognized options instead of silently ignoring them (parity with bash/macOS)
+    if ($UnknownArgs -and $UnknownArgs.Count -gt 0) {
+        Write-LogError "Unknown option: $($UnknownArgs[0])"
+        exit 1
+    }
+
     # Show help if requested
     if ($help) {
         Show-Usage

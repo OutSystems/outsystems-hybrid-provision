@@ -83,7 +83,6 @@ USAGE:
 
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
-    --env=ENVIRONMENT       Environment: dev, test, stage, ea, ga (default: ga)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
@@ -96,21 +95,21 @@ OPTIONS:
 
 OPERATIONS:
     install                 Install OutSystems Self-Hosted Operator
-    uninstall               Uninstall OutSystems Self-Hosted Operator  
+    uninstall               Uninstall OutSystems Self-Hosted Operator
     get-console-url         Get console URL for installed SHO
 
 EXAMPLES:
-    # Install latest version in GA environment
+    # Install latest version
     ${SCRIPT_NAME}
-    
-    # Install specific version in EA environment
-    ${SCRIPT_NAME} --operation=install --version=0.2.3 --env=ea
-    
-    # Get console URL for test environment
-    ${SCRIPT_NAME} --operation=get-console-url --env=test
-    
-    # Uninstall from GA environment
-    ${SCRIPT_NAME} --operation=uninstall --env=ga
+
+    # Install specific version
+    ${SCRIPT_NAME} --operation=install --version=0.2.3
+
+    # Get console URL
+    ${SCRIPT_NAME} --operation=get-console-url
+
+    # Uninstall
+    ${SCRIPT_NAME} --operation=uninstall
 
 EOF
 }
@@ -125,11 +124,6 @@ logout_ecr_public() {
 validate_arguments() {
     log_step "Validating arguments..."
     
-    # Set ENV to default if not provided
-    if [[ -z "$ENV" ]]; then
-        log_info "No environment specified. Using default: $DEFAULT_ENV"
-        ENV="$DEFAULT_ENV"
-    fi
     # Validate environment
     case "$ENV" in
         ga|ea|stage|test|dev)
@@ -224,10 +218,6 @@ parse_arguments() {
             --version=*)
                 SHO_VERSION="${1#*=}"
                 log_info "Version specified: $SHO_VERSION"
-                ;;
-            --env=*)
-                ENV="${1#*=}"
-                log_info "Environment specified: $ENV"
                 ;;
             --operation=*)
                 OPERATION="${1#*=}"
