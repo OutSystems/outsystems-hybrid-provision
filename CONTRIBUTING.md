@@ -63,6 +63,21 @@ RDSHDT-1980: Support Pegasus Flag
 4. The **PR Preview Release** workflow automatically publishes your modified scripts to the `gh-pages` branch under the `pr/` directory with `DEFAULT_ENV` set to `dev`. A bot comment provides curl/irm one-liners you can use to test.
 5. After review and merge, the **Main Branch Ring Deployment** workflow deploys scripts across all environment rings (dev, test, ea, ga) and creates a GitHub Release.
 
+Every PR must satisfy all of the following:
+
+- [ ] Branch named per the convention above
+- [ ] Title formatted per the convention below
+- [ ] PR body filled in per `.github/PULL_REQUEST_TEMPLATE.md`
+
+#### PR Title Format
+
+`JIRA-ID: Short description`
+
+Example: `RDSHDT-1234: Correct stamp trigger`
+
+#### PR Description
+Fill in `.github/PULL_REQUEST_TEMPLATE.md`. Context must cover what changed, why, and how it was done.
+
 ### Environment rings
 
 The installer scripts support four environment rings, each pointing to a different ECR alias:
@@ -75,6 +90,10 @@ The installer scripts support four environment rings, each pointing to a differe
 | `ga` | General Availability (production default) |
 
 The `DEFAULT_ENV` variable in each script controls which ring is used by default. CI modifies this value per ring during deployment -- do not hardcode ring-specific values in the source scripts.
+
+## Code Ownership
+
+See `.github/CODEOWNERS`.
 
 ## Testing
 
