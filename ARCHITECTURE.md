@@ -1,18 +1,18 @@
-# outsystems-hybrid-provision Architecture
+# outsystems-selfhosted-provision Architecture
 
-> **Repository:** outsystems-hybrid-provision
+> **Repository:** outsystems-selfhosted-provision
 > **Runtime Environment:** CLI tool (operator's workstation)
 > **Last Updated:** 2026-03-26
 
 ## Overview
 
-This repository hosts platform-specific installer scripts (Linux, macOS, Windows) that provision the OutSystems Self-Hosted Operator (SHO) onto a customer's Kubernetes or OpenShift cluster. The scripts run on an operator's local machine and orchestrate Helm-based installation of the SHO operator, which then manages the hybrid ODC platform within the customer's infrastructure.
+This repository hosts platform-specific installer scripts (Linux, macOS, Windows) that provision the OutSystems Self-Hosted Operator (SHO) onto a customer's Kubernetes or OpenShift cluster. The scripts run on an operator's local machine and orchestrate Helm-based installation of the SHO operator, which then manages the self-hosted ODC platform (Hybrid and FRSH tenants) within the customer's infrastructure.
 
 ## Architecture Diagram
 
 ```mermaid
 graph TB
-    ThisRepo["outsystems-hybrid-provision<br/>Runs on: Operator's Workstation (CLI)"]
+    ThisRepo["outsystems-selfhosted-provision<br/>Runs on: Operator's Workstation (CLI)"]
 
     ECR["AWS ECR Public Registry<br/>(public.ecr.aws)<br/>EXTERNAL"]
     K8s["Kubernetes / OpenShift Cluster<br/>EXTERNAL"]

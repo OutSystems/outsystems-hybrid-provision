@@ -1,4 +1,4 @@
-# Contributing to outsystems-hybrid-provision
+# Contributing to outsystems-selfhosted-provision
 
 ## Overview
 
@@ -16,8 +16,8 @@ This repository contains installer scripts (Bash and PowerShell) for the OutSyst
 ### Clone and verify
 
 ```bash
-git clone git@github.com:OutSystems/outsystems-hybrid-provision.git
-cd outsystems-hybrid-provision
+git clone git@github.com:OutSystems/outsystems-selfhosted-provision.git
+cd outsystems-selfhosted-provision
 ```
 
 There is no build or install step. The scripts under `scripts/` are the source of truth.

@@ -68,7 +68,7 @@ jobs:
           <html>
           <head>
               <meta charset="utf-8">
-              <title>OutSystems Hybrid Provision Installers</title>
+              <title>OutSystems Self-Hosted Provision Installers</title>
               <style>
                   body {
                       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -104,7 +104,7 @@ jobs:
               </style>
           </head>
           <body>
-              <h1>OutSystems Hybrid Provision Installers</h1>
+              <h1>OutSystems Self-Hosted Provision Installers</h1>
               <p>Choose your environment ring and download the appropriate installer script.</p>
               
               <div class="ring">
@@ -164,13 +164,15 @@ jobs:
               
               <h2>Quick Install</h2>
               <p>Linux/macOS:</p>
-              <code>curl -fsSL https://outsystems.github.io/outsystems-hybrid-provision/ga/linux-installer.sh | bash</code>
+              <code>curl -fsSL __PAGES_URL__/ga/linux-installer.sh | bash</code>
               
               <p>Windows PowerShell:</p>
-              <code>irm https://outsystems.github.io/outsystems-hybrid-provision/ga/windows-installer.ps1 | iex</code>
+              <code>irm __PAGES_URL__/ga/windows-installer.ps1 | iex</code>
           </body>
           </html>
           HTMLEOF
+          # The Pages URL follows the repository name, so a repository rename needs no workflow edit.
+          sed -i "s|__PAGES_URL__|https://outsystems.github.io/${{ github.event.repository.name }}|g" gh-pages/index.html
 
       - name: Commit and push changes
         run: |
@@ -192,11 +194,11 @@ jobs:
             All environment rings have been updated with the latest installer scripts.
             
             ### Available Rings:
-            - **dev**: https://outsystems.github.io/outsystems-hybrid-provision/dev/
-            - **test**: https://outsystems.github.io/outsystems-hybrid-provision/test/
-            - **stage**: https://outsystems.github.io/outsystems-hybrid-provision/stage/
-            - **ea**: https://outsystems.github.io/outsystems-hybrid-provision/ea/
-            - **ga**: https://outsystems.github.io/outsystems-hybrid-provision/ga/
+            - **dev**: https://outsystems.github.io/${{ github.event.repository.name }}/dev/
+            - **test**: https://outsystems.github.io/${{ github.event.repository.name }}/test/
+            - **stage**: https://outsystems.github.io/${{ github.event.repository.name }}/stage/
+            - **ea**: https://outsystems.github.io/${{ github.event.repository.name }}/ea/
+            - **ga**: https://outsystems.github.io/${{ github.event.repository.name }}/ga/
             
             ### Changes:
             ${{ github.event.head_commit.message }}

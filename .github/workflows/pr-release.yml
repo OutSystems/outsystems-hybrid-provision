@@ -63,7 +63,7 @@ jobs:
         with:
           script: |
             const prNumber = ${{ steps.pr.outputs.number }};
-            const repoUrl = 'https://outsystems.github.io/outsystems-hybrid-provision';
+            const repoUrl = 'https://outsystems.github.io/${{ github.event.repository.name }}';
             
             const comment = `## 🚀 PR Preview Scripts Available
             
