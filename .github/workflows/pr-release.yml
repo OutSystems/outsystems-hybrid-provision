@@ -11,6 +11,9 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  PAGES_URL: https://outsystems.github.io/outsystems-selfhosted-provision
+
 jobs:
   pr-preview:
     runs-on: ubuntu-latest
@@ -63,7 +66,7 @@ jobs:
         with:
           script: |
             const prNumber = ${{ steps.pr.outputs.number }};
-            const repoUrl = 'https://outsystems.github.io/${{ github.event.repository.name }}';
+            const repoUrl = process.env.PAGES_URL;
             
             const comment = `## 🚀 PR Preview Scripts Available
             

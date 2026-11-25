@@ -11,6 +11,9 @@ on:
 permissions:
   contents: write
 
+env:
+  PAGES_URL: https://outsystems.github.io/outsystems-selfhosted-provision
+
 jobs:
   deploy-rings:
     runs-on: ubuntu-latest
@@ -171,8 +174,7 @@ jobs:
           </body>
           </html>
           HTMLEOF
-          # The Pages URL follows the repository name, so a repository rename needs no workflow edit.
-          sed -i "s|__PAGES_URL__|https://outsystems.github.io/${{ github.event.repository.name }}|g" gh-pages/index.html
+          sed -i "s|__PAGES_URL__|$PAGES_URL|g" gh-pages/index.html
 
       - name: Commit and push changes
         run: |
@@ -194,11 +196,11 @@ jobs:
             All environment rings have been updated with the latest installer scripts.
             
             ### Available Rings:
-            - **dev**: https://outsystems.github.io/${{ github.event.repository.name }}/dev/
-            - **test**: https://outsystems.github.io/${{ github.event.repository.name }}/test/
-            - **stage**: https://outsystems.github.io/${{ github.event.repository.name }}/stage/
-            - **ea**: https://outsystems.github.io/${{ github.event.repository.name }}/ea/
-            - **ga**: https://outsystems.github.io/${{ github.event.repository.name }}/ga/
+            - **dev**: ${{ env.PAGES_URL }}/dev/
+            - **test**: ${{ env.PAGES_URL }}/test/
+            - **stage**: ${{ env.PAGES_URL }}/stage/
+            - **ea**: ${{ env.PAGES_URL }}/ea/
+            - **ga**: ${{ env.PAGES_URL }}/ga/
             
             ### Changes:
             ${{ github.event.head_commit.message }}
