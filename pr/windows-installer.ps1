@@ -101,8 +101,19 @@ function Write-LogStep {
     Write-Host "[STEP] $Message" -ForegroundColor $Script:Colors.Blue
 }
 
+# Internal options are only shown in the negative rings (dev, test, stage), never in ea or ga
+function Test-InternalOptionsEnabled {
+    return $Script:Env -in @("dev", "test", "stage")
+}
+
 # Function to show usage
 function Show-Usage {
+    $internalOptionsHelp = if (Test-InternalOptionsEnabled) {
+        "`n    -use-acr BOOLEAN        Use ACR registry: true, false (default: false)`n                             [TEMPORARY: Backward compatibility for Azure ACR]`n    -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)`n                              Note: Only supported in test environment`n    -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)`n    -sh_monitoring BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)`n                              Note: Currently enabled only in the test cluster, where Pegasus is also enabled"
+    } else {
+        ""
+    }
+
     @"
 $Script:ScriptName v$Script:ScriptVersion - OutSystems Self-Hosted Operator for Windows
 
@@ -112,14 +123,7 @@ USAGE:
 OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
-    -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
-    -use-acr BOOLEAN        Use ACR registry: true, false (default: false)
-                             [TEMPORARY: Backward compatibility for Azure ACR]
-    -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
-                              Note: Only supported in test environment
-    -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
-    -sh_monitoring BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
-                              Note: Currently enabled only in the test cluster, where Pegasus is also enabled
+    -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)$internalOptionsHelp
     -help, -h               Show this help message
 
 OPERATIONS:
@@ -1092,7 +1096,9 @@ Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
 Image Registry: $Script:PubRegistry/$Script:ImageRegistry
 $(if ($Script:Op -eq 'install') {
-"Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr`nKevents Replicas: $Script:KeventsReplicas`nSH Monitoring:  $($Script:ShMonitoring.ToString().ToLower())"
+"Version:        $Script:ShoVersion" + $(if (Test-InternalOptionsEnabled) {
+"`nUse ACR:        $Script:UseAcr`nKevents Replicas: $Script:KeventsReplicas`nSH Monitoring:  $($Script:ShMonitoring.ToString().ToLower())"
+})
 })
 
 "@
