@@ -11,9 +11,6 @@ on:
 permissions:
   contents: write
 
-env:
-  PAGES_URL: https://outsystems.github.io/outsystems-selfhosted-provision
-
 jobs:
   deploy-rings:
     runs-on: ubuntu-latest
@@ -167,14 +164,13 @@ jobs:
               
               <h2>Quick Install</h2>
               <p>Linux/macOS:</p>
-              <code>curl -fsSL __PAGES_URL__/ga/linux-installer.sh | bash</code>
+              <code>curl -fsSL https://outsystems.github.io/outsystems-selfhosted-provision/ga/linux-installer.sh | bash</code>
               
               <p>Windows PowerShell:</p>
-              <code>irm __PAGES_URL__/ga/windows-installer.ps1 | iex</code>
+              <code>irm https://outsystems.github.io/outsystems-selfhosted-provision/ga/windows-installer.ps1 | iex</code>
           </body>
           </html>
           HTMLEOF
-          sed -i "s|__PAGES_URL__|$PAGES_URL|g" gh-pages/index.html
 
       - name: Commit and push changes
         run: |
@@ -196,11 +192,11 @@ jobs:
             All environment rings have been updated with the latest installer scripts.
             
             ### Available Rings:
-            - **dev**: ${{ env.PAGES_URL }}/dev/
-            - **test**: ${{ env.PAGES_URL }}/test/
-            - **stage**: ${{ env.PAGES_URL }}/stage/
-            - **ea**: ${{ env.PAGES_URL }}/ea/
-            - **ga**: ${{ env.PAGES_URL }}/ga/
+            - **dev**: https://outsystems.github.io/outsystems-selfhosted-provision/dev/
+            - **test**: https://outsystems.github.io/outsystems-selfhosted-provision/test/
+            - **stage**: https://outsystems.github.io/outsystems-selfhosted-provision/stage/
+            - **ea**: https://outsystems.github.io/outsystems-selfhosted-provision/ea/
+            - **ga**: https://outsystems.github.io/outsystems-selfhosted-provision/ga/
             
             ### Changes:
             ${{ github.event.head_commit.message }}
