@@ -113,8 +113,6 @@ OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
-"@
-    @"
     -use-acr BOOLEAN        Use ACR registry: true, false (default: false)
                              [TEMPORARY: Backward compatibility for Azure ACR]
     -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
@@ -122,8 +120,6 @@ OPTIONS:
     -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
     -sh_monitoring BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
                               Note: Currently enabled only in the test cluster, where Pegasus is also enabled
-"@
-    @"
     -help, -h               Show this help message
 
 OPERATIONS:
@@ -1095,8 +1091,6 @@ Namespace:      $Script:Namespace
 Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
 Image Registry: $Script:PubRegistry/$Script:ImageRegistry
-"@
-    @"
 $(if ($Script:Op -eq 'install') {
 "Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr`nKevents Replicas: $Script:KeventsReplicas`nSH Monitoring:  $($Script:ShMonitoring.ToString().ToLower())"
 })

@@ -97,8 +97,6 @@ OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
-"@
-    @"
     -help, -h               Show this help message
 
 OPERATIONS:
@@ -1005,8 +1003,6 @@ Namespace:      $Script:Namespace
 Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
 Image Registry: $Script:PubRegistry/$Script:ImageRegistry
-"@
-    @"
 $(if ($Script:Op -eq 'install') {
 "Version:        $Script:ShoVersion"
 })

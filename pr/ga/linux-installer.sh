@@ -70,8 +70,6 @@ ${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for Linux
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
-EOF
-    cat << EOF
     --help, -h              Show this help message
 
 OPERATIONS:

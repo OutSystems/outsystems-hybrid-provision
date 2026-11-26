@@ -84,8 +84,6 @@ USAGE:
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
-EOF
-    cat << EOF
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
     --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
@@ -93,8 +91,6 @@ EOF
     --kevents-replicas=NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
     --sh-monitoring=BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
                               Note: Currently enabled only in the test cluster, where Pegasus is also enabled
-EOF
-    cat << EOF
     --help, -h              Show this help message
 
 OPERATIONS:
