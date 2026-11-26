@@ -84,7 +84,7 @@ Initialize-Environment *> `$null
 
 function Get-HelmArgs {
     param([string]$File, [string]$Before = '')
-    $argsFile = Join-Path $env:TEMP ('helm-args-' + [guid]::NewGuid().ToString('N') + '.txt')
+    $argsFile = Join-Path ([System.IO.Path]::GetTempPath()) ('helm-args-' + [guid]::NewGuid().ToString('N') + '.txt')
     try {
         $null = Invoke-Harness -File $File -Body (Get-InstallBody -ArgsFile $argsFile -Before $Before)
         if (Test-Path $argsFile) { return ((Get-Content $argsFile) -join "`n") }
@@ -97,7 +97,7 @@ function Get-HelmArgs {
 $internalHelp = 'use-acr|pegasus_enabled|kevents_replicas|sh_monitoring'
 
 foreach ($ring in ($negativeRings + $positiveRings)) {
-    $file = Join-Path $BuildDir "$ring\windows-installer.ps1"
+    $file = Join-Path (Join-Path $BuildDir $ring) 'windows-installer.ps1'
 
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$parseErrors)
