@@ -73,14 +73,6 @@ log_step() {
     echo -e "${BLUE}🔍 $1${NC}"
 }
 
-# Internal options are only shown in the negative rings (dev, test, stage), never in ea or ga
-internal_options_enabled() {
-    case "$ENV" in
-        dev|test|stage) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # Function to show usage
 show_usage() {
     cat << EOF
@@ -93,9 +85,7 @@ OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
 EOF
-
-    if internal_options_enabled; then
-        cat << EOF
+    cat << EOF
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
     --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
@@ -104,8 +94,6 @@ EOF
     --sh-monitoring=BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
                               Note: Currently enabled only in the test cluster, where Pegasus is also enabled
 EOF
-    fi
-
     cat << EOF
     --help, -h              Show this help message
 
@@ -949,11 +937,9 @@ show_configuration() {
     echo "Environment:    $ENV"
     if [[ "$OPERATION" == "install" ]]; then
         echo "Version:        ${SHO_VERSION:-latest}"
-        if internal_options_enabled; then
-            echo "Use ACR:        $USE_ACR"
-            echo "Kevents Replicas: $KEVENTS_REPLICAS"
-            echo "SH Monitoring:  $SH_MONITORING"
-        fi
+        echo "Use ACR:        $USE_ACR"
+        echo "Kevents Replicas: $KEVENTS_REPLICAS"
+        echo "SH Monitoring:  $SH_MONITORING"
     fi
     echo "Namespace:      $NAMESPACE"
     echo "Chart Name:     $CHART_NAME"
