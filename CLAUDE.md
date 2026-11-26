@@ -18,7 +18,7 @@ scripts/
   macos-installer.sh      # Bash installer for macOS (~32K)
   windows-installer.ps1   # PowerShell installer for Windows (~42K)
 .github/workflows/
-  pr-release.yml          # PR preview: publishes dev-ring scripts to gh-pages/pr/
+  pr-release.yml          # PR preview: publishes dev-ring scripts to gh-pages/pr/ and a ga build to gh-pages/pr/ga/
   main-release.yml        # Main deploy: publishes all rings to gh-pages/<ring>/, creates GitHub Release
 ```
 
@@ -50,7 +50,7 @@ The Linux, macOS, and Windows scripts must stay functionally aligned. Any featur
 
 ### Script configuration pattern
 
-Each script defines its tunable defaults as variables at the top of the file (`DEFAULT_ENV`, `DEFAULT_OPERATION`, `DEFAULT_USE_ACR`, `DEFAULT_PEGASUS_ENABLED`, `DEFAULT_KEVENTS_REPLICAS`, `DEFAULT_SH_MONITORING`). CI pipelines modify `DEFAULT_ENV` via `sed` replacement to produce per-ring copies -- never hardcode ring-specific values in the source scripts.
+Each script defines its tunable defaults as variables at the top of the file (`DEFAULT_ENV`, `DEFAULT_OPERATION`, `DEFAULT_USE_ACR`, `DEFAULT_PEGASUS_ENABLED`, `DEFAULT_KEVENTS_REPLICAS`, `DEFAULT_SH_MONITORING`). CI builds per-ring copies with `tools/build-ring.sh`, which sets `DEFAULT_ENV` and, for ea and ga, strips the code between `# internal-only:begin` and `# internal-only:end`. Never hardcode ring-specific values in the source scripts. Anything that must not reach customers (new internal option, variable, registry alias, `helm --set` flag) goes inside an `internal-only` block, and `tools/test-rings.sh` must pass.
 
 ### Logging functions
 
@@ -58,7 +58,7 @@ All user-facing output must go through the existing logging helpers: `log_info`,
 
 ### ECR alias constants
 
-Each environment ring maps to a distinct ECR alias constant (`ECR_ALIAS_GA`, `ECR_ALIAS_EA`, `ECR_ALIAS_TEST`, `ECR_ALIAS_DEV`). The `setup_environment` function selects the correct alias based on the `ENV` variable. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the T3 tenet on ECR Public as the canonical registry.
+Each environment ring maps to a distinct ECR alias constant (`ECR_ALIAS_GA`, `ECR_ALIAS_EA`, `ECR_ALIAS_TEST`, `ECR_ALIAS_STAGE`, `ECR_ALIAS_DEV`; the test, stage and dev ones are `internal-only` and absent from the ea/ga scripts). The `setup_environment` function selects the correct alias based on the `ENV` variable. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the T3 tenet on ECR Public as the canonical registry.
 
 ### The `--use-acr` flag is a temporary shim
 

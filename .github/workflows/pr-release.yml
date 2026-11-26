@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'scripts/**'
+      - 'tools/**'
       - '.github/workflows/pr-release.yml'
 
 permissions:
@@ -22,21 +23,14 @@ jobs:
         id: pr
         run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
-      - name: Prepare scripts with dev default
+      - name: Prepare scripts with dev default and a ga preview
         run: |
-          mkdir -p pr-scripts
-          
-          # Process linux-installer.sh
-          cp scripts/linux-installer.sh pr-scripts/linux-installer.sh
-          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/linux-installer.sh
-          
-          # Process macos-installer.sh
-          cp scripts/macos-installer.sh pr-scripts/macos-installer.sh
-          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/macos-installer.sh
-          
-          # Process windows-installer.ps1
-          cp scripts/windows-installer.ps1 pr-scripts/windows-installer.ps1
-          sed -i 's/\$Script:DefaultEnv = "[^"]*"/$Script:DefaultEnv = "dev"/' pr-scripts/windows-installer.ps1
+          for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
+            # dev: the internal ring, with the internal options (this is what the PR preview has always been)
+            tools/build-ring.sh dev "scripts/$script" "pr-scripts/$script"
+            # ga: what a customer gets, without the internal options
+            tools/build-ring.sh ga "scripts/$script" "pr-scripts/ga/$script"
+          done
 
       - name: Checkout gh-pages
         uses: actions/checkout@v4
@@ -50,6 +44,8 @@ jobs:
           cp pr-scripts/linux-installer.sh gh-pages/pr/
           cp pr-scripts/macos-installer.sh gh-pages/pr/
           cp pr-scripts/windows-installer.ps1 gh-pages/pr/
+          mkdir -p gh-pages/pr/ga
+          cp pr-scripts/ga/* gh-pages/pr/ga/
           
           cd gh-pages
           git config user.name "github-actions[bot]"
@@ -84,7 +80,12 @@ jobs:
             irm ${repoUrl}/pr/windows-installer.ps1 | iex
             \`\`\`
 
-            **Default Environment:** dev`;
+            **Default Environment:** dev
+
+            ### What a customer gets (ga build, without the internal options):
+            - **Linux**: \`${repoUrl}/pr/ga/linux-installer.sh\`
+            - **macOS**: \`${repoUrl}/pr/ga/macos-installer.sh\`
+            - **Windows**: \`${repoUrl}/pr/ga/windows-installer.ps1\``;
             
             github.rest.issues.createComment({
               issue_number: prNumber,

@@ -76,6 +76,25 @@ The installer scripts support four environment rings, each pointing to a differe
 
 The `DEFAULT_ENV` variable in each script controls which ring is used by default. CI modifies this value per ring during deployment -- do not hardcode ring-specific values in the source scripts.
 
+### Internal-only options
+
+`dev`, `test` and `stage` are internal rings. Some options exist only for them (`--use-acr`, `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring`) and must not be in the script a customer downloads from `ea` or `ga`, not even in the source, because customers (and tools they use) read the scripts. The scripts in `scripts/` are the single source; `tools/build-ring.sh` builds each ring from them:
+
+```bash
+# internal-only:begin
+...code that exists only in dev, test and stage (options, variables, validation, helm --set flags)...
+# internal-only:end
+# positive-only:begin
+# ...a replacement for ea and ga, written as comments (one "# " in front of each line)...
+# positive-only:end
+```
+
+- Put every new internal option, variable and registry alias inside an `internal-only` block. Do not rely on hiding it from `--help`.
+- Markers must be on their own line and outside here-strings and heredocs (a marker inside one would be printed). Split the heredoc / here-string around the block, as the help text does.
+- Blocks cannot be nested.
+- Run `bash tools/test-rings.sh` before opening a PR. It builds every ring and checks structure, syntax, `--help`, the configuration summary, unknown-option handling and the exact `helm upgrade` arguments for Linux, macOS and Windows. The Windows checks need PowerShell (`pwsh`, or `powershell.exe` from WSL); set `REQUIRE_POWERSHELL=1` to fail instead of skip.
+- To see what a customer gets, build it: `tools/build-ring.sh ga scripts/linux-installer.sh /tmp/ga-linux-installer.sh`.
+
 ## Testing
 
 There is no automated test suite. Before submitting a PR, manually verify your changes:
@@ -101,7 +120,8 @@ There is no automated test suite. Before submitting a PR, manually verify your c
 
 | Trigger | Workflow | What it does |
 |---------|----------|--------------|
-| PR opened/updated (changes in `scripts/`) | `pr-release.yml` | Publishes preview scripts to `gh-pages/pr/` with `dev` default |
-| Push to `main` (changes in `scripts/`) | `main-release.yml` | Deploys all rings to `gh-pages/<ring>/` and creates a GitHub Release |
+| PR opened/updated (changes in `scripts/` or `tools/`) | `pr-release.yml` | Publishes preview scripts to `gh-pages/pr/` with `dev` default, and a `ga` build to `gh-pages/pr/ga/` |
+| PR opened/updated (changes in `scripts/` or `tools/`) | `ring-scripts-check.yml` | Builds every ring and runs `tools/test-rings.sh`; the job summary shows what `ga` removes compared to `dev` and the built scripts are attached as an artifact |
+| Push to `main` (changes in `scripts/` or `tools/`) | `main-release.yml` | Runs `tools/test-rings.sh`, then deploys all rings to `gh-pages/<ring>/` and creates a GitHub Release |
 
-Both workflows only trigger when files under `scripts/` or the workflow file itself are modified.
+The workflows only trigger when files under `scripts/` or `tools/` or the workflow file itself are modified.

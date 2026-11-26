@@ -12,17 +12,21 @@ CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
 DEFAULT_ENV="ga" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
+# internal-only:begin
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
 DEFAULT_KEVENTS_REPLICAS="0"  # Number of Kevents replicas (0 or 1) - Used to push Kubernetes events to Grafana
 DEFAULT_SH_MONITORING="false"  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
+# internal-only:end
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
 ECR_ALIAS_EA="m5i8c6m7/ea"    # EA ECR alias
+# internal-only:begin
 ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
 ECR_ALIAS_STAGE="u5a4o8b8/stage"  # Stage ECR alias
 ECR_ALIAS_DEV="w0o4m8y0/dev"  # Dev ECR alias
+# internal-only:end
 PUB_REGISTRY="public.ecr.aws"
 
 # kubectl version configuration
@@ -34,10 +38,12 @@ KUBECTL_VERSION="v1.34.0"  # Compatible with K8s 1.33-1.35
 SHO_VERSION=""
 ENV="$DEFAULT_ENV"
 OPERATION="$DEFAULT_OPERATION"
+# internal-only:begin
 USE_ACR="$DEFAULT_USE_ACR"
 PEGASUS_ENABLED="$DEFAULT_PEGASUS_ENABLED"
 KEVENTS_REPLICAS="$DEFAULT_KEVENTS_REPLICAS"
 SH_MONITORING="$DEFAULT_SH_MONITORING"
+# internal-only:end
 
 # Derived configuration (set by setup_environment)
 ECR_ALIAS=""
@@ -73,14 +79,6 @@ log_step() {
     echo -e "${BLUE}🔍 $1${NC}"
 }
 
-# Internal options are only shown in the negative rings (dev, test, stage), never in ea or ga
-internal_options_enabled() {
-    case "$ENV" in
-        dev|test|stage) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # Function to show usage
 show_usage() {
     cat << EOF
@@ -90,9 +88,8 @@ OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
 EOF
-
-    if internal_options_enabled; then
-        cat << EOF
+# internal-only:begin
+    cat << EOF
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
     --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
@@ -101,8 +98,7 @@ EOF
     --sh-monitoring=BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
                               Note: Currently enabled only in the test cluster, where Pegasus is also enabled
 EOF
-    fi
-
+# internal-only:end
     cat << EOF
     --help, -h              Show this help message
 
@@ -139,11 +135,21 @@ validate_arguments() {
     
     # Validate environment
     case "$ENV" in
+# internal-only:begin
         ga|ea|stage|test|dev)
+# internal-only:end
+# positive-only:begin
+#         ga|ea)
+# positive-only:end
             log_success "Environment '$ENV' is valid"
             ;;
         *)
+# internal-only:begin
             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
+# internal-only:end
+# positive-only:begin
+#             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea"
+# positive-only:end
             return 1
             ;;
     esac
@@ -173,6 +179,7 @@ validate_arguments() {
         log_success "Version '$SHO_VERSION' format is valid"
     fi
     
+# internal-only:begin
     # Validate Pegasus configuration
     if [[ "$PEGASUS_ENABLED" == "true" && "$ENV" != "test" ]]; then
         log_error "Pegasus features (--pegasus-enabled=true) are only supported in 'test' environment"
@@ -219,6 +226,7 @@ validate_arguments() {
             log_info "Skipping ACR configuration validation (not required for operation: $OPERATION)"
         fi
     fi
+# internal-only:end
     
     return 0
 }
@@ -235,6 +243,7 @@ parse_arguments() {
                 OPERATION="${1#*=}"
                 log_info "Operation specified: $OPERATION"
                 ;;
+            # internal-only:begin
             --use-acr=*)
                 USE_ACR="${1#*=}"
                 # Normalize boolean values
@@ -299,6 +308,7 @@ parse_arguments() {
                         ;;
                 esac
                 ;;
+            # internal-only:end
             --help|-h)
                 show_usage
                 exit 0
@@ -327,6 +337,7 @@ setup_environment() {
             ECR_ALIAS="$ECR_ALIAS_EA"
             log_info "Using EA ECR alias: $ECR_ALIAS"
             ;;
+        # internal-only:begin
         test)
             ECR_ALIAS="$ECR_ALIAS_TEST"
             log_info "Using Test ECR alias: $ECR_ALIAS"
@@ -339,8 +350,14 @@ setup_environment() {
             ECR_ALIAS="$ECR_ALIAS_DEV"
             log_info "Using Dev ECR alias: $ECR_ALIAS"
             ;;
+        # internal-only:end
         *)
+# internal-only:begin
             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
+# internal-only:end
+# positive-only:begin
+#             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea"
+# positive-only:end
             exit 1
             ;;
     esac
@@ -608,6 +625,7 @@ sho_install() {
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     
     local install_output
+# internal-only:begin
     if [[ "$USE_ACR" == "true" ]]; then
         log_info "Installing with ACR registry configuration"
         install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
@@ -638,6 +656,17 @@ sho_install() {
             --set "keventsReplicas=$KEVENTS_REPLICAS" \
             --set "shMonitoring=$SH_MONITORING" 2>&1)
     fi
+# internal-only:end
+# positive-only:begin
+#     install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
+#         --namespace "$NAMESPACE" \
+#         --create-namespace \
+#         --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
+#         --set "image.repository=${IMAGE_NAME}" \
+#         --set "image.tag=v${SHO_VERSION}" \
+#         --set-string "podAnnotations.timestamp=$timestamp" \
+#         --set "ring=$ENV" 2>&1)
+# positive-only:end
     
     if [[ $? -eq 0 ]]; then
         log_success "OutSystems Self-Hosted Operator installed successfully!"
@@ -938,11 +967,11 @@ show_configuration() {
     echo "Environment:    $ENV"
     if [[ "$OPERATION" == "install" ]]; then
         echo "Version:        ${SHO_VERSION:-latest}"
-        if internal_options_enabled; then
-            echo "Use ACR:        $USE_ACR"
-            echo "Kevents Replicas: $KEVENTS_REPLICAS"
-            echo "SH Monitoring:  $SH_MONITORING"
-        fi
+        # internal-only:begin
+        echo "Use ACR:        $USE_ACR"
+        echo "Kevents Replicas: $KEVENTS_REPLICAS"
+        echo "SH Monitoring:  $SH_MONITORING"
+        # internal-only:end
     fi
     echo "Namespace:      $NAMESPACE"
     echo "Chart Name:     $CHART_NAME"

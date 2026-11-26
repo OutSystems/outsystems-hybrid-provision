@@ -61,12 +61,14 @@ Each platform (Linux, macOS, Windows) ships a single self-contained script that 
 
 ### T2. Ring-based environment isolation with identical script structure
 
-All environment rings (dev, test, ea, ga) use the same script logic; only the `DEFAULT_ENV` variable and corresponding ECR alias differ. The CI pipeline (`main-release.yml`) produces per-ring copies by `sed`-replacing the default environment value. This ensures behavioral parity across rings and prevents ring-specific code drift.
+All environment rings (dev, test, stage, ea, ga) are built from one source script per platform, so there is no ring-specific code to drift apart. The internal rings (dev, test, stage) carry options that customers must not see: `--use-acr`, `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring` and the dev/test/stage ECR aliases. That code is wrapped in `internal-only` markers, and `tools/build-ring.sh` removes it when it builds ea and ga, so the script a customer downloads contains none of it, not only a help text that hides it. dev, test and stage keep the full script. `tools/test-rings.sh` checks every ring on every PR and before every release.
 
 **Evidence:**
 - `scripts/linux-installer.sh` (in `setup_environment`) - switches ECR alias based on `ENV` variable; all other logic is shared
-- `.github/workflows/main-release.yml` (in `Prepare ring-specific scripts`) - copies scripts per ring and patches only `DEFAULT_ENV`
-- `.github/workflows/pr-release.yml` (in `Prepare scripts with dev default`) - PR previews always default to `dev` ring
+- `tools/build-ring.sh` - sets `DEFAULT_ENV` and, for ea and ga, removes the `internal-only` blocks
+- `.github/workflows/main-release.yml` (in `Prepare ring-specific scripts`) - builds every ring with `tools/build-ring.sh`, after `tools/test-rings.sh` passes
+- `.github/workflows/ring-scripts-check.yml` - runs `tools/test-rings.sh` on every PR and shows what ga removes compared to dev
+- `.github/workflows/pr-release.yml` (in `Prepare scripts with dev default and a ga preview`) - PR previews are published for the `dev` ring (`pr/`) and as a customer-facing `ga` build (`pr/ga/`)
 
 ### T3. ECR Public as the canonical artifact registry
 
@@ -98,7 +100,7 @@ The scripts use `helm upgrade --install` exclusively for deploying the SHO opera
 
 ### ACR backward compatibility must be maintained
 
-The `--use-acr` flag and associated ACR login logic exist to support customers who were onboarded before the migration to ECR Public. This path requires `SP_ID`, `SP_SECRET`, and `SH_REGISTRY` environment variables.
+The `--use-acr` flag and associated ACR login logic exist to support customers who were onboarded before the migration to ECR Public. This path requires `SP_ID`, `SP_SECRET`, and `SH_REGISTRY` environment variables. The flag is available in dev, test and stage only; the ea and ga scripts do not contain it and reject it as an unknown option.
 
 > **Expires when:** All customers have migrated to ECR Public and the ACR registry is decommissioned.
 

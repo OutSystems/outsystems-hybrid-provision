@@ -5,6 +5,7 @@ param(
     [string]$version = $null,
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
+    # internal-only:begin
     [ValidateSet("true", "false")]
     [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
     [ValidateSet("true", "false")]
@@ -14,6 +15,7 @@ param(
     [ValidateSet("true", "false")]
     [string]$sh_monitoring = "false",  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
     [switch]$UseAcr,
+    # internal-only:end
     [Alias("h")]
     [switch]$help,
     # Without CmdletBinding, PowerShell's "simple" binding silently absorbs an unrecognized
@@ -41,9 +43,11 @@ $Script:DefaultEnv = "ga" # Default environment as per the release state. Change
 # Environment-specific settings
 $Script:EcrAliasGa = "j0s5s8b0/ga"    # GA ECR alias
 $Script:EcrAliasEa = "m5i8c6m7/ea"    # EA ECR alias
+# internal-only:begin
 $Script:EcrAliasTest = "u4p0z5h7/test"  # Test ECR alias
 $Script:EcrAliasStage = "u5a4o8b8/stage"  # Stage ECR alias
 $Script:EcrAliasDev = "w0o4m8y0/dev"   # Dev ECR alias
+# internal-only:end
 $Script:PubRegistry = "public.ecr.aws"
 
 # kubectl version configuration
@@ -55,10 +59,12 @@ $Script:KubectlVersion = "v1.34.0"  # Compatible with K8s 1.33-1.35
 $Script:ShoVersion = $version
 $Script:Env = $Script:DefaultEnv
 $Script:Op = $operation
+# internal-only:begin
 $Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $false }
 $Script:PegasusEnabled = if ($pegasus_enabled -eq "true") { $true } else { $false }
 $Script:KeventsReplicas = [int]$kevents_replicas
 $Script:ShMonitoring = if ($sh_monitoring -eq "true") { $true } else { $false }
+# internal-only:end
 
 # Derived configuration
 $Script:EcrAlias = ""
@@ -101,19 +107,8 @@ function Write-LogStep {
     Write-Host "[STEP] $Message" -ForegroundColor $Script:Colors.Blue
 }
 
-# Internal options are only shown in the negative rings (dev, test, stage), never in ea or ga
-function Test-InternalOptionsEnabled {
-    return $Script:Env -in @("dev", "test", "stage")
-}
-
 # Function to show usage
 function Show-Usage {
-    $internalOptionsHelp = if (Test-InternalOptionsEnabled) {
-        "`n    -use-acr BOOLEAN        Use ACR registry: true, false (default: false)`n                             [TEMPORARY: Backward compatibility for Azure ACR]`n    -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)`n                              Note: Only supported in test environment`n    -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)`n    -sh_monitoring BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)`n                              Note: Currently enabled only in the test cluster, where Pegasus is also enabled"
-    } else {
-        ""
-    }
-
     @"
 $Script:ScriptName v$Script:ScriptVersion - OutSystems Self-Hosted Operator for Windows
 
@@ -123,7 +118,20 @@ USAGE:
 OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
-    -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)$internalOptionsHelp
+    -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
+"@
+# internal-only:begin
+    @"
+    -use-acr BOOLEAN        Use ACR registry: true, false (default: false)
+                             [TEMPORARY: Backward compatibility for Azure ACR]
+    -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
+                              Note: Only supported in test environment
+    -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
+    -sh_monitoring BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
+                              Note: Currently enabled only in the test cluster, where Pegasus is also enabled
+"@
+# internal-only:end
+    @"
     -help, -h               Show this help message
 
 OPERATIONS:
@@ -156,11 +164,18 @@ function Test-Arguments {
     switch ($Script:Env) {
         "ga" { Write-LogSuccess "Environment 'ga' is valid" }
         "ea" { Write-LogSuccess "Environment 'ea' is valid" }
+        # internal-only:begin
         "test" { Write-LogSuccess "Environment 'test' is valid" }
         "stage" { Write-LogSuccess "Environment 'stage' is valid" }
         "dev" { Write-LogSuccess "Environment 'dev' is valid" }
+        # internal-only:end
         default {
+# internal-only:begin
             Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, stage, dev"
+# internal-only:end
+# positive-only:begin
+#             Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea"
+# positive-only:end
             return $false
         }
     }
@@ -174,6 +189,7 @@ function Test-Arguments {
         Write-LogSuccess "Version '$Script:ShoVersion' format is valid"
     }
 
+# internal-only:begin
     # Validate ACR configuration only for install operation
     if ($Script:UseAcr) {
         if ($Script:Op -eq "install") {
@@ -201,6 +217,7 @@ function Test-Arguments {
             Write-LogInfo "Skipping ACR configuration validation (not required for operation: $($Script:Op))"
         }
     }
+# internal-only:end
 
     # Temporarily disable uninstall operation
     if ($Script:Op -eq "uninstall") {
@@ -225,6 +242,7 @@ function Initialize-Environment {
             $Script:EcrAlias = $Script:EcrAliasEa
             Write-LogInfo "Using EA ECR alias: $($Script:EcrAlias)"
         }
+        # internal-only:begin
         "test" {
             $Script:EcrAlias = $Script:EcrAliasTest
             Write-LogInfo "Using Test ECR alias: $($Script:EcrAlias)"
@@ -237,8 +255,14 @@ function Initialize-Environment {
             $Script:EcrAlias = $Script:EcrAliasDev
             Write-LogInfo "Using Dev ECR alias: $($Script:EcrAlias)"
         }
+        # internal-only:end
         default {
+# internal-only:begin
             Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea, test, stage, dev"
+# internal-only:end
+# positive-only:begin
+#             Write-LogError "Invalid environment: '$Script:Env'. Must be one of: ga, ea"
+# positive-only:end
             exit 1
         }
     }
@@ -613,6 +637,7 @@ function Install-Sho {
             "--set", "ring=$Script:Env"
         )
         
+# internal-only:begin
         # Validate Pegasus configuration
         if ($Script:PegasusEnabled -and $Script:Env -ne "test") {
             Write-LogError "Pegasus features (-pegasus_enabled true) are only supported in 'test' environment"
@@ -636,6 +661,7 @@ function Install-Sho {
             "--set", "keventsReplicas=$Script:KeventsReplicas",
             "--set", "shMonitoring=$($Script:ShMonitoring.ToString().ToLower())"
         )
+# internal-only:end
         
         $installOutput = & helm $helmArgs 2>&1
         
@@ -1095,13 +1121,23 @@ Namespace:      $Script:Namespace
 Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
 Image Registry: $Script:PubRegistry/$Script:ImageRegistry
+"@
+# internal-only:begin
+    @"
 $(if ($Script:Op -eq 'install') {
-"Version:        $Script:ShoVersion" + $(if (Test-InternalOptionsEnabled) {
-"`nUse ACR:        $Script:UseAcr`nKevents Replicas: $Script:KeventsReplicas`nSH Monitoring:  $($Script:ShMonitoring.ToString().ToLower())"
-})
+"Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr`nKevents Replicas: $Script:KeventsReplicas`nSH Monitoring:  $($Script:ShMonitoring.ToString().ToLower())"
 })
 
 "@
+# internal-only:end
+# positive-only:begin
+#     @"
+# $(if ($Script:Op -eq 'install') {
+# "Version:        $Script:ShoVersion"
+# })
+#
+# "@
+# positive-only:end
 }
 
 # Main execution

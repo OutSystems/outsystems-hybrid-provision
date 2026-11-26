@@ -1,0 +1,57 @@
+name: Ring Scripts Check
+
+# Builds the installer of every ring and checks what each ring ships. ea and ga must not contain the internal
+# options, variables or registry aliases; dev, test and stage must keep them. See tools/test-rings.sh.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'tools/**'
+      - '.github/workflows/ring-scripts-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ring-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build every ring and run the checks
+        env:
+          REQUIRE_POWERSHELL: "1"
+          KEEP_BUILD: "1"
+        shell: bash   # bash -eo pipefail, so a failing test is not hidden by tee
+        run: bash tools/test-rings.sh | tee test-output.txt
+
+      - name: Show what ga removes compared to dev
+        if: always()
+        run: |
+          BUILD="$(sed -n 's/^Building every ring into //p' test-output.txt | head -1)"
+          mkdir -p ring-build
+          cp -r "$BUILD"/. ring-build/
+          {
+            echo "## What the ga build removes compared to dev"
+            echo
+            echo "Lines starting with \`-\` exist in the dev/test/stage scripts and are **not** in the ea/ga scripts a customer downloads."
+            for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
+              echo
+              echo "<details><summary>$script</summary>"
+              echo
+              echo '```diff'
+              diff -U1 "ring-build/dev/$script" "ring-build/ga/$script" | tail -n +3 || true
+              echo '```'
+              echo
+              echo "</details>"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the built scripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ring-scripts
+          path: ring-build
