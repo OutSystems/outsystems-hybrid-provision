@@ -57,16 +57,16 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 
 ### Platform-Specific Scripts
 
-- **Linux**: `scripts/linux-installer.sh`
-- **macOS**: `scripts/macos-installer.sh`  
-- **Windows**: `scripts/windows-installer.ps1`
+- **Linux**: `scripts/positive/linux-installer.sh` (customers, rings `ea` and `ga`) and `scripts/negative/linux-installer.sh` (internal rings `dev`, `test`, `stage`)
+- **macOS**: `scripts/positive/macos-installer.sh` and `scripts/negative/macos-installer.sh`
+- **Windows**: `scripts/positive/windows-installer.ps1` and `scripts/negative/windows-installer.ps1`
 
 ### Basic Installation Commands
 
 **Linux/macOS:**
 ```bash
 # Run locally
-./scripts/linux-installer.sh --operation=install
+./scripts/positive/linux-installer.sh --operation=install
 ```
 
 **Windows PowerShell:**
@@ -98,8 +98,8 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Install Latest Version
 ```bash
 # Linux/macOS
-./scripts/linux-installer.sh
-./scripts/macos-installer.sh
+./scripts/positive/linux-installer.sh
+./scripts/positive/macos-installer.sh
 
 # Windows
 .\scripts\windows-installer.ps1
@@ -108,7 +108,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Install Specific Version
 ```bash
 # Linux/macOS
-./scripts/linux-installer.sh --operation=install --version=0.2.3
+./scripts/positive/linux-installer.sh --operation=install --version=0.2.3
 
 # Windows
 .\scripts\windows-installer.ps1 --operation=install -version 0.2.3 
@@ -117,7 +117,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Get Console URL
 ```bash
 # Linux/macOS
-./scripts/linux-installer.sh --operation=get-console-url
+./scripts/positive/linux-installer.sh --operation=get-console-url
 
 # Windows
 .\scripts\windows-installer.ps1 -operation get-console-url
@@ -126,7 +126,7 @@ The OutSystems Self-Hosted Operator installer provides platform-specific scripts
 #### Uninstall SHO
 ```bash
 # Linux/macOS
-./scripts/linux-installer.sh --operation=uninstall
+./scripts/positive/linux-installer.sh --operation=uninstall
 
 # Windows
 .\scripts\windows-installer.ps1 -operation uninstall

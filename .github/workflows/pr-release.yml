@@ -26,10 +26,10 @@ jobs:
       - name: Prepare scripts with dev default and a ga preview
         run: |
           for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
-            # dev: the internal ring, with the internal options (this is what the PR preview has always been)
-            tools/build-ring.sh dev "scripts/$script" "pr-scripts/$script"
-            # ga: what a customer gets, without the internal options
-            tools/build-ring.sh ga "scripts/$script" "pr-scripts/ga/$script"
+            # dev: from scripts/negative, with the internal options (what the PR preview has always been)
+            tools/build-ring.sh dev "$script" "pr-scripts/$script"
+            # ga: from scripts/positive, what a customer gets, without the internal options
+            tools/build-ring.sh ga "$script" "pr-scripts/ga/$script"
           done
 
       - name: Checkout gh-pages

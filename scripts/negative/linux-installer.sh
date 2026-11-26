@@ -3,7 +3,7 @@
 set -e
 
 # Script Configuration
-SCRIPT_NAME="macos-installer.sh"
+SCRIPT_NAME="linux-installer.sh"
 SCRIPT_VERSION="1.0.0"
 
 # Default Configuration
@@ -12,21 +12,17 @@ CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
 DEFAULT_ENV="ga" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
-# internal-only:begin
 DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
 DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
 DEFAULT_KEVENTS_REPLICAS="0"  # Number of Kevents replicas (0 or 1) - Used to push Kubernetes events to Grafana
 DEFAULT_SH_MONITORING="false"  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
-# internal-only:end
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
 ECR_ALIAS_EA="m5i8c6m7/ea"    # EA ECR alias
-# internal-only:begin
 ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
 ECR_ALIAS_STAGE="u5a4o8b8/stage"  # Stage ECR alias
 ECR_ALIAS_DEV="w0o4m8y0/dev"  # Dev ECR alias
-# internal-only:end
 PUB_REGISTRY="public.ecr.aws"
 
 # kubectl version configuration
@@ -38,12 +34,10 @@ KUBECTL_VERSION="v1.34.0"  # Compatible with K8s 1.33-1.35
 SHO_VERSION=""
 ENV="$DEFAULT_ENV"
 OPERATION="$DEFAULT_OPERATION"
-# internal-only:begin
 USE_ACR="$DEFAULT_USE_ACR"
 PEGASUS_ENABLED="$DEFAULT_PEGASUS_ENABLED"
 KEVENTS_REPLICAS="$DEFAULT_KEVENTS_REPLICAS"
 SH_MONITORING="$DEFAULT_SH_MONITORING"
-# internal-only:end
 
 # Derived configuration (set by setup_environment)
 ECR_ALIAS=""
@@ -82,17 +76,11 @@ log_step() {
 # Function to show usage
 show_usage() {
     cat << EOF
-${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for macOS
-
-USAGE:
-    ${SCRIPT_NAME} [OPTIONS]
+${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for Linux
 
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
-EOF
-# internal-only:begin
-    cat << EOF
     --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
                            [TEMPORARY: Backward compatibility for Azure ACR]
     --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
@@ -100,9 +88,6 @@ EOF
     --kevents-replicas=NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
     --sh-monitoring=BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
                               Note: Currently enabled only in the test cluster, where Pegasus is also enabled
-EOF
-# internal-only:end
-    cat << EOF
     --help, -h              Show this help message
 
 OPERATIONS:
@@ -138,21 +123,11 @@ validate_arguments() {
     
     # Validate environment
     case "$ENV" in
-# internal-only:begin
         ga|ea|stage|test|dev)
-# internal-only:end
-# positive-only:begin
-#         ga|ea)
-# positive-only:end
             log_success "Environment '$ENV' is valid"
             ;;
         *)
-# internal-only:begin
             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
-# internal-only:end
-# positive-only:begin
-#             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea"
-# positive-only:end
             return 1
             ;;
     esac
@@ -179,11 +154,9 @@ validate_arguments() {
             log_error "Invalid version format: '$SHO_VERSION'. Expected format: x.y.z (e.g., 0.2.3)"
             return 1
         fi
-        
         log_success "Version '$SHO_VERSION' format is valid"
     fi
     
-# internal-only:begin
     # Validate Pegasus configuration
     if [[ "$PEGASUS_ENABLED" == "true" && "$ENV" != "test" ]]; then
         log_error "Pegasus features (--pegasus-enabled=true) are only supported in 'test' environment"
@@ -202,7 +175,7 @@ validate_arguments() {
         log_error "Invalid value for sh-monitoring: '$SH_MONITORING'. Must be true or false"
         return 1
     fi
-
+    
     # Validate ACR configuration only for install operation
     if [[ "$USE_ACR" == "true" ]]; then
         if [[ "$OPERATION" == "install" ]]; then
@@ -230,7 +203,6 @@ validate_arguments() {
             log_info "Skipping ACR configuration validation (not required for operation: $OPERATION)"
         fi
     fi
-# internal-only:end
     
     return 0
 }
@@ -247,7 +219,6 @@ parse_arguments() {
                 OPERATION="${1#*=}"
                 log_info "Operation specified: $OPERATION"
                 ;;
-            # internal-only:begin
             --use-acr=*)
                 USE_ACR="${1#*=}"
                 # Normalize boolean values
@@ -312,7 +283,6 @@ parse_arguments() {
                         ;;
                 esac
                 ;;
-            # internal-only:end
             --help|-h)
                 show_usage
                 exit 0
@@ -341,7 +311,6 @@ setup_environment() {
             ECR_ALIAS="$ECR_ALIAS_EA"
             log_info "Using EA ECR alias: $ECR_ALIAS"
             ;;
-        # internal-only:begin
         test)
             ECR_ALIAS="$ECR_ALIAS_TEST"
             log_info "Using Test ECR alias: $ECR_ALIAS"
@@ -354,14 +323,8 @@ setup_environment() {
             ECR_ALIAS="$ECR_ALIAS_DEV"
             log_info "Using Dev ECR alias: $ECR_ALIAS"
             ;;
-        # internal-only:end
         *)
-# internal-only:begin
             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
-# internal-only:end
-# positive-only:begin
-#             log_error "Invalid environment: '$ENV'. Must be one of: ga, ea"
-# positive-only:end
             exit 1
             ;;
     esac
@@ -380,34 +343,39 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to install package using Homebrew
-install_package_homebrew() {
+# Function to install package using Linux package managers
+install_package() {
     local package="$1"
     
-    log_step "Installing $package via Homebrew..."
+    log_step "Installing $package..."
     
-    if ! command_exists brew; then
-        log_error "Homebrew not found. Please install Homebrew first: https://brew.sh"
+    if command_exists apt-get; then
+        sudo apt-get update && sudo apt-get install -y "$package"
+    elif command_exists yum; then
+        sudo yum install -y "$package"
+    elif command_exists dnf; then
+        sudo dnf install -y "$package"
+    elif command_exists pacman; then
+        sudo pacman -S --noconfirm "$package"
+    elif command_exists zypper; then
+        sudo zypper install -y "$package"
+    else
+        log_error "No supported package manager found. Please install $package manually."
         return 1
     fi
-    
-    brew install "$package"
 }
 
 # Function to install kubectl
 install_kubectl() {
     log_step "Installing kubectl..."
-    
-    if command_exists brew; then
-        log_info "Installing kubectl via Homebrew..."
-        brew install kubectl
-    else
-        log_info "Installing kubectl via direct download..."
-        local version
-        version="$KUBECTL_VERSION"
 
-        log_info "Downloading kubectl $version (compatible with K8s 1.33-1.35)..."
-        curl -LO "https://dl.k8s.io/release/$version/bin/darwin/amd64/kubectl"
+    local version
+    version="$KUBECTL_VERSION"
+
+    log_info "Downloading kubectl $version (compatible with K8s 1.33-1.35)..."
+    
+    # Download kubectl binary for Linux
+    if curl -LO "https://dl.k8s.io/release/$version/bin/linux/amd64/kubectl"; then
         chmod +x kubectl
         
         # Try to move to system PATH
@@ -421,14 +389,17 @@ install_kubectl() {
             log_error "Failed to install kubectl to system PATH"
             return 1
         fi
-    fi
-    
-    # Verify installation
-    if command_exists kubectl; then
-        log_success "kubectl installed successfully"
-        return 0
+        
+        # Verify installation
+        if command_exists kubectl; then
+            log_success "kubectl installed successfully"
+            return 0
+        else
+            log_error "kubectl installation verification failed"
+            return 1
+        fi
     else
-        log_error "kubectl installation failed"
+        log_error "Failed to download kubectl"
         return 1
     fi
 }
@@ -437,17 +408,11 @@ install_kubectl() {
 install_helm() {
     log_step "Installing Helm..."
     
-    if command_exists brew; then
-        log_info "Installing Helm via Homebrew..."
-        brew install helm
-    else
-        log_info "Installing Helm via official script..."
-        # Use official Helm installation script
-        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-        rm -f get_helm.sh
-    fi
+    # Use official Helm installation script
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    ./get_helm.sh
+    rm -f get_helm.sh
     
     if command_exists helm; then
         log_success "Helm installed successfully"
@@ -461,31 +426,23 @@ install_helm() {
 
 # Function to check dependencies
 check_dependencies() {
-    log_step "Checking dependencies for macOS..."
+    log_step "Checking dependencies for Linux..."
     local all_deps_ok=true
-    
-    # Check if Homebrew is available
-    if command_exists brew; then
-        log_success "Homebrew is available"
-    else
-        log_warning "Homebrew not found. Some installations may fall back to manual methods."
-        log_info "For best experience, install Homebrew from: https://brew.sh"
-    fi
     
     # Check jq
     if ! command_exists jq; then
         log_warning "jq not found. Installing..."
-        if ! install_package_homebrew jq; then
+        if ! install_package jq; then
             all_deps_ok=false
         fi
     else
         log_success "jq is installed"
     fi
     
-    # Check curl (usually pre-installed on macOS)
+    # Check curl
     if ! command_exists curl; then
         log_warning "curl not found. Installing..."
-        if ! install_package_homebrew curl; then
+        if ! install_package curl; then
             all_deps_ok=false
         fi
     else
@@ -600,10 +557,10 @@ sho_install() {
     
     # Enable OCI mode for Helm
     export HELM_EXPERIMENTAL_OCI=1
-    
+
     # Logout from ECR public registry to avoid stale credentials
     logout_ecr_public
-
+    
     # Pull chart to temp directory
     local chart_oci="oci://${PUB_REGISTRY}/${CHART_REPOSITORY}"
     local tmpdir
@@ -635,7 +592,6 @@ sho_install() {
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     
     local install_output
-# internal-only:begin
     if [[ "$USE_ACR" == "true" ]]; then
         log_info "Installing with ACR registry configuration"
         install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
@@ -666,17 +622,6 @@ sho_install() {
             --set "keventsReplicas=$KEVENTS_REPLICAS" \
             --set "shMonitoring=$SH_MONITORING" 2>&1)
     fi
-# internal-only:end
-# positive-only:begin
-#     install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
-#         --namespace "$NAMESPACE" \
-#         --create-namespace \
-#         --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
-#         --set "image.repository=${IMAGE_NAME}" \
-#         --set "image.tag=v${SHO_VERSION}" \
-#         --set-string "podAnnotations.timestamp=$timestamp" \
-#         --set "ring=$ENV" 2>&1)
-# positive-only:end
     
     if [[ $? -eq 0 ]]; then
         log_success "OutSystems Self-Hosted Operator installed successfully!"
@@ -841,12 +786,12 @@ test_url_accessible() {
     return 1
 }
 
-# Function to open browser (macOS)
+# Function to open browser (Linux)
 open_browser() {
     local url="$1"
     
-    if command_exists open; then
-        open "$url"
+    if command_exists xdg-open; then
+        xdg-open "$url"
         log_success "Browser opened"
     else
         log_info "Please open the URL manually: $url"
@@ -865,8 +810,8 @@ sho_uninstall() {
     log_info "Release: $CHART_NAME"
     log_info "Namespace: $NAMESPACE"
     echo
-    echo -n "Are you sure you want to proceed? (y/n): "
-    read -r confirm
+    read -p "Are you sure you want to proceed? (y/n): " -r confirm
+    
     if [[ ! "$confirm" =~ ^(yes|y)$ ]]; then
         log_info "Uninstallation cancelled"
         exit 0
@@ -901,8 +846,7 @@ sho_uninstall() {
         log_success "SHO release uninstalled successfully"
         
         # Optional: Delete namespace
-        echo -n "Do you want to delete the namespace '$NAMESPACE'? (y/n): "
-        read -r delete_ns
+        read -p "Do you want to delete the namespace '$NAMESPACE'? (y/n): " -r delete_ns
         if [[ "$delete_ns" =~ ^(yes|y)$ ]]; then
             kubectl delete namespace "$NAMESPACE" --wait=false || true
             log_info "Namespace deletion initiated"
@@ -973,16 +917,14 @@ show_configuration() {
     echo ""
     echo "=== Configuration Summary ==="
     echo "Script Version: $SCRIPT_VERSION"
-    echo "Platform:       macOS"
+    echo "Platform:       Linux"
     echo "Operation:      $OPERATION"
     echo "Environment:    $ENV"
     if [[ "$OPERATION" == "install" ]]; then
         echo "Version:        ${SHO_VERSION:-latest}"
-        # internal-only:begin
         echo "Use ACR:        $USE_ACR"
         echo "Kevents Replicas: $KEVENTS_REPLICAS"
         echo "SH Monitoring:  $SH_MONITORING"
-        # internal-only:end
     fi
     echo "Namespace:      $NAMESPACE"
     echo "Chart Name:     $CHART_NAME"
@@ -993,7 +935,7 @@ show_configuration() {
 
 # Main function
 main() {
-    echo "🍎 OutSystems Self-Hosted Operator macOS Installer v${SCRIPT_VERSION}"
+    echo "🐧 OutSystems Self-Hosted Operator Linux Installer v${SCRIPT_VERSION}"
     echo
     
     # Parse command line arguments
@@ -1006,13 +948,13 @@ main() {
     
     # Setup environment
     setup_environment
-    
+
     # Check dependencies
     if ! check_dependencies; then
         log_error "Dependency check failed. Please resolve issues and try again."
         exit 1
     fi
-
+    
     # For install operation, get version if not specified before showing configuration
     if [[ "$OPERATION" == "install" ]]; then
         if [[ -z "$SHO_VERSION" || "$SHO_VERSION" == "latest" ]]; then
@@ -1022,7 +964,7 @@ main() {
             fi
         fi
     fi
-
+    
     # Show configuration
     show_configuration
     

@@ -56,18 +56,18 @@ graph TB
 Each platform (Linux, macOS, Windows) ships a single self-contained script that auto-detects and installs all prerequisites (kubectl, helm, jq, curl). The user should never need to manually install tooling before running the installer. This lowers the barrier to adoption for customers who may not have a pre-configured workstation.
 
 **Evidence:**
-- `scripts/linux-installer.sh` (in `check_dependencies`) - automatically installs kubectl, helm, jq, and curl if missing
-- `scripts/windows-installer.ps1` (in dependency checks) - installs Chocolatey, then uses it for jq/curl, downloads kubectl and helm binaries directly
+- `scripts/negative/linux-installer.sh` (in `check_dependencies`) - automatically installs kubectl, helm, jq, and curl if missing
+- `scripts/negative/windows-installer.ps1` (in dependency checks) - installs Chocolatey, then uses it for jq/curl, downloads kubectl and helm binaries directly
 
 ### T2. Ring-based environment isolation with identical script structure
 
-All environment rings (dev, test, stage, ea, ga) are built from one source script per platform, so there is no ring-specific code to drift apart. The internal rings (dev, test, stage) carry options that customers must not see: `--use-acr`, `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring` and the dev/test/stage ECR aliases. That code is wrapped in `internal-only` markers, and `tools/build-ring.sh` removes it when it builds ea and ga, so the script a customer downloads contains none of it, not only a help text that hides it. dev, test and stage keep the full script. `tools/test-rings.sh` checks every ring on every PR and before every release.
+The installers live in two folders. `scripts/negative/` holds the scripts for the internal rings (dev, test, stage), which carry options customers must not see: `--use-acr`, `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring` and the dev/test/stage ECR aliases. `scripts/positive/` holds the scripts for ea and ga, which contain none of that: not hidden from `--help`, but absent from the source a customer downloads. Both folders have the same structure and the same behavior apart from the internal options; the CI pipeline only sets `DEFAULT_ENV` per ring. `tools/test-rings.sh` runs on every PR and before every release and fails if an internal option appears in `scripts/positive/`, or if the two folders drift apart in their help text or `helm upgrade` flags.
 
-**Evidence:**
-- `scripts/linux-installer.sh` (in `setup_environment`) - switches ECR alias based on `ENV` variable; all other logic is shared
-- `tools/build-ring.sh` - sets `DEFAULT_ENV` and, for ea and ga, removes the `internal-only` blocks
+**Evidence:** (paths below are the full scripts in `scripts/negative/`; `scripts/positive/` has the same code without the internal options)
+- `scripts/negative/linux-installer.sh` (in `setup_environment`) - switches ECR alias based on `ENV` variable; all other logic is shared
+- `tools/build-ring.sh` - builds one ring: picks `scripts/negative/` (dev, test, stage) or `scripts/positive/` (ea, ga) and sets `DEFAULT_ENV`
 - `.github/workflows/main-release.yml` (in `Prepare ring-specific scripts`) - builds every ring with `tools/build-ring.sh`, after `tools/test-rings.sh` passes
-- `.github/workflows/ring-scripts-check.yml` - runs `tools/test-rings.sh` on every PR and shows what ga removes compared to dev
+- `.github/workflows/ring-scripts-check.yml` - runs `tools/test-rings.sh` on every PR and shows how `scripts/positive/` differs from `scripts/negative/`
 - `.github/workflows/pr-release.yml` (in `Prepare scripts with dev default and a ga preview`) - PR previews are published for the `dev` ring (`pr/`) and as a customer-facing `ga` build (`pr/ga/`)
 
 ### T3. ECR Public as the canonical artifact registry
@@ -75,9 +75,9 @@ All environment rings (dev, test, stage, ea, ga) are built from one source scrip
 All Helm charts and container images are pulled from AWS ECR Public (`public.ecr.aws`). Each ring has its own ECR alias (e.g., `j0s5s8b0/ga`, `m5i8c6m7/ea`). The ACR path exists only as a temporary backward-compatibility shim and is off by default. New integrations must target ECR Public.
 
 **Evidence:**
-- `scripts/linux-installer.sh` (in global constants) - `PUB_REGISTRY="public.ecr.aws"` with per-ring `ECR_ALIAS_*` variables
-- `scripts/linux-installer.sh` (in `sho_install`) - ACR path gated behind `USE_ACR` flag with comment "Temporary backward compatibility for Azure ACR"
-- `scripts/windows-installer.ps1` (in parameter defaults) - `$use_acr = "false"` by default
+- `scripts/negative/linux-installer.sh` (in global constants) - `PUB_REGISTRY="public.ecr.aws"` with per-ring `ECR_ALIAS_*` variables
+- `scripts/negative/linux-installer.sh` (in `sho_install`) - ACR path gated behind `USE_ACR` flag with comment "Temporary backward compatibility for Azure ACR"
+- `scripts/negative/windows-installer.ps1` (in parameter defaults) - `$use_acr = "false"` by default
 
 ### T4. GitHub Pages as the distribution channel for installer scripts
 
@@ -93,8 +93,8 @@ Installer scripts are not distributed via package managers or binary releases. I
 The scripts use `helm upgrade --install` exclusively for deploying the SHO operator. There is no direct manifest application, no Kustomize, and no custom resource creation outside of Helm. This ensures that Helm is the single source of truth for the deployed state, making rollback and version management straightforward.
 
 **Evidence:**
-- `scripts/linux-installer.sh` (in `sho_install`) - uses `helm upgrade --install` with `--create-namespace` for idempotent deployment
-- `scripts/linux-installer.sh` (in `sho_uninstall`) - uses `helm uninstall` as the primary teardown, with kubectl only for finalizer cleanup
+- `scripts/negative/linux-installer.sh` (in `sho_install`) - uses `helm upgrade --install` with `--create-namespace` for idempotent deployment
+- `scripts/negative/linux-installer.sh` (in `sho_uninstall`) - uses `helm uninstall` as the primary teardown, with kubectl only for finalizer cleanup
 
 ## Current Phase Constraints
 
@@ -105,5 +105,5 @@ The `--use-acr` flag and associated ACR login logic exist to support customers w
 > **Expires when:** All customers have migrated to ECR Public and the ACR registry is decommissioned.
 
 **Evidence:**
-- `scripts/linux-installer.sh` (in `validate_arguments`) - ACR env var validation gated behind `USE_ACR == "true"`
-- `scripts/linux-installer.sh` (line-level comment) - `DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR`
+- `scripts/negative/linux-installer.sh` (in `validate_arguments`) - ACR env var validation gated behind `USE_ACR == "true"`
+- `scripts/negative/linux-installer.sh` (line-level comment) - `DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR`

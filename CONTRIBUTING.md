@@ -58,7 +58,7 @@ RDSHDT-1980: Support Pegasus Flag
 ### Pull requests
 
 1. Create a branch from `main` using the naming convention above.
-2. Make changes to the relevant scripts in `scripts/`.
+2. Make changes to the relevant scripts in `scripts/negative/` and `scripts/positive/` (see [Two script folders](#two-script-folders)).
 3. Open a PR targeting `main`.
 4. The **PR Preview Release** workflow automatically publishes your modified scripts to the `gh-pages` branch under the `pr/` directory with `DEFAULT_ENV` set to `dev`. A bot comment provides curl/irm one-liners you can use to test.
 5. After review and merge, the **Main Branch Ring Deployment** workflow deploys scripts across all environment rings (dev, test, ea, ga) and creates a GitHub Release.
@@ -76,24 +76,20 @@ The installer scripts support four environment rings, each pointing to a differe
 
 The `DEFAULT_ENV` variable in each script controls which ring is used by default. CI modifies this value per ring during deployment -- do not hardcode ring-specific values in the source scripts.
 
-### Internal-only options
+### Two script folders
 
-`dev`, `test` and `stage` are internal rings. Some options exist only for them (`--use-acr`, `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring`) and must not be in the script a customer downloads from `ea` or `ga`, not even in the source, because customers (and tools they use) read the scripts. The scripts in `scripts/` are the single source; `tools/build-ring.sh` builds each ring from them:
+The installers live in two folders, because customers (and tools they use) read the scripts they download:
 
-```bash
-# internal-only:begin
-...code that exists only in dev, test and stage (options, variables, validation, helm --set flags)...
-# internal-only:end
-# positive-only:begin
-# ...a replacement for ea and ga, written as comments (one "# " in front of each line)...
-# positive-only:end
-```
+| Folder | Rings | Contents |
+|--------|-------|----------|
+| `scripts/negative/` | `dev`, `test`, `stage` | The full scripts, including the internal options `--use-acr`, `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring`, their variables, validation, the dev/test/stage registry aliases and the matching `helm --set` flags |
+| `scripts/positive/` | `ea`, `ga` | The same scripts without any of the internal options, variables or aliases. The ring only picks the ECR alias of `ea` or `ga` |
 
-- Put every new internal option, variable and registry alias inside an `internal-only` block. Do not rely on hiding it from `--help`.
-- Markers must be on their own line and outside here-strings and heredocs (a marker inside one would be printed). Split the heredoc / here-string around the block, as the help text does.
-- Blocks cannot be nested.
-- Run `bash tools/test-rings.sh` before opening a PR. It builds every ring and checks structure, syntax, `--help`, the configuration summary, unknown-option handling and the exact `helm upgrade` arguments for Linux, macOS and Windows. The Windows checks need PowerShell (`pwsh`, or `powershell.exe` from WSL); set `REQUIRE_POWERSHELL=1` to fail instead of skip.
-- To see what a customer gets, build it: `tools/build-ring.sh ga scripts/linux-installer.sh /tmp/ga-linux-installer.sh`.
+- A new internal option goes in `scripts/negative/` only. Never add it to `scripts/positive/`.
+- A change to shared behavior (a bug fix, a new customer-facing option, help text, the install flow) goes in **both** folders, for all three platforms.
+- `tools/build-ring.sh <ring> <script-name> <output>` builds the script of one ring, which is the folder's script with `DEFAULT_ENV` set. To see what a customer gets: `tools/build-ring.sh ga linux-installer.sh /tmp/ga-linux-installer.sh`.
+- Run `bash tools/test-rings.sh` before opening a PR. It builds every ring and checks that `ea`/`ga` contain none of the internal options, that `dev`/`test`/`stage` still do, and that the two folders have not drifted apart in `--help` text and `helm upgrade` flags. It also checks the unknown-option handling, the configuration summary and the exact `helm upgrade` arguments, on Linux, macOS and Windows. The Windows checks need PowerShell (`pwsh`, or `powershell.exe` from WSL); set `REQUIRE_POWERSHELL=1` to fail instead of skip.
+- The CI job `Ring Scripts Check` runs the same checks and shows in its summary how `scripts/positive/` differs from `scripts/negative/`.
 
 ## Testing
 

@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 #
-# Builds the installers for every ring and checks what a customer would get.
+# Builds the installer of every ring from scripts/negative (dev, test, stage) and scripts/positive (ea, ga) and
+# checks what a customer would get.
 #
-#   tools/test-rings.sh            # build into a temp dir and test
-#   KEEP_BUILD=1 tools/test-rings.sh   # keep the built scripts (path is printed)
-#   REQUIRE_POWERSHELL=1 ...       # fail instead of skipping when PowerShell is not available (used in CI)
+#   tools/test-rings.sh                # build into a temp dir and test
+#   KEEP_BUILD=1 tools/test-rings.sh   # keep the built scripts (the path is printed)
+#   REQUIRE_POWERSHELL=1 ...           # fail instead of skipping when PowerShell is not available (used in CI)
 #
 # What is checked, per platform script (linux, macos, windows):
-#   - every ring builds, no directive markers are left in the output and the script parses
+#   - every ring builds and the script parses
 #   - ea and ga contain none of the internal options, variables or registry aliases
-#   - dev, test and stage still contain them (so a broken strip cannot pass as a clean ea/ga build)
+#   - dev, test and stage still contain them
 #   - --help: dev/test/stage list the four internal options, ea/ga list none, and the rest of the help is identical
+#     (this keeps the two folders from drifting apart in the text customers read)
 #   - an internal flag is rejected as an unknown option in ea/ga and accepted in dev/test/stage
 #   - the configuration summary shows the internal lines only in dev/test/stage
-#   - the helm upgrade arguments: internal --set flags only in dev/test/stage, the common flags in every ring
+#   - the helm upgrade arguments: internal --set flags only in dev/test/stage, the same common flags in every ring
 
 set -uo pipefail
 
@@ -25,9 +27,8 @@ NEGATIVE_RINGS=(dev test stage)
 POSITIVE_RINGS=(ea ga)
 ALL_RINGS=("${NEGATIVE_RINGS[@]}" "${POSITIVE_RINGS[@]}")
 
-# Names that must never appear in an ea/ga script (case-insensitive), and the markers that must never appear anywhere.
+# Names that must never appear in an ea/ga script (case-insensitive).
 FORBIDDEN='use[-_]acr|useacr|pegasus|kevents|sh[-_]monitoring|shmonitoring|SP_ID|SP_SECRET|SH_REGISTRY|u4p0z5h7|u5a4o8b8|w0o4m8y0|ECR_ALIAS_(TEST|STAGE|DEV)|EcrAlias(Test|Stage|Dev)|\bACR\b'
-MARKERS='internal-only:|positive-only:'
 
 failures=0
 checks=0
@@ -44,16 +45,12 @@ check() { # check <description> <exit-code> [detail]
 echo "Building every ring into $BUILD"
 for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
     for ring in "${ALL_RINGS[@]}"; do
-        "$ROOT/tools/build-ring.sh" "$ring" "$ROOT/scripts/$script" "$BUILD/$ring/$script"
+        "$ROOT/tools/build-ring.sh" "$ring" "$script" "$BUILD/$ring/$script"
         check "build $ring/$script" $?
     done
 done
 
 for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
-    for ring in "${ALL_RINGS[@]}"; do
-        ! grep -qE "$MARKERS" "$BUILD/$ring/$script"
-        check "no directive markers left in $ring/$script" $?
-    done
     for ring in "${POSITIVE_RINGS[@]}"; do
         hits="$(grep -niE "$FORBIDDEN" "$BUILD/$ring/$script" | head -3)"
         [[ -z "$hits" ]]

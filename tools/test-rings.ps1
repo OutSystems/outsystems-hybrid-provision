@@ -96,6 +96,23 @@ function Get-HelmArgs {
 
 $internalHelp = 'use-acr|pegasus_enabled|kevents_replicas|sh_monitoring'
 
+# The -help of the ea/ga script must be the dev -help without the internal option block, so the two script
+# folders do not drift apart in what customers read.
+function Get-HelpLines {
+    param([string]$File, [bool]$DropInternalBlock)
+    $lines = @((Invoke-Built -File $File -Arguments @('-help')).Output -split "`r?`n" | ForEach-Object { $_.TrimEnd() })
+    if (-not $DropInternalBlock) { return $lines }
+    $kept = New-Object System.Collections.Generic.List[string]
+    $skipping = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\s+-use-acr ') { $skipping = $true }
+        if (-not $skipping) { $kept.Add($line) }
+        if ($skipping -and $line -match 'Currently enabled only in the test cluster') { $skipping = $false }
+    }
+    return $kept.ToArray()
+}
+$expectedPositiveHelp = Get-HelpLines -File (Join-Path (Join-Path $BuildDir 'dev') 'windows-installer.ps1') -DropInternalBlock $true
+
 foreach ($ring in ($negativeRings + $positiveRings)) {
     $file = Join-Path (Join-Path $BuildDir $ring) 'windows-installer.ps1'
 
@@ -122,6 +139,10 @@ foreach ($ring in ($negativeRings + $positiveRings)) {
         Test-Check "$ring/windows-installer.ps1 helm upgrade with -use_acr passes the registry flags" (($helmAcr -match '(?m)^registry.url=reg$') -and ($helmAcr -match '(?m)^enableECR.enabled=false$')) ($helmAcr -replace "`n", ' ')
     } else {
         Test-Check "$ring/windows-installer.ps1 -help lists none of the internal options" ($helpLines -eq 0) "found $helpLines"
+
+        $actualHelp = Get-HelpLines -File $file -DropInternalBlock $false
+        $same = ($actualHelp -join "`n") -ceq ($expectedPositiveHelp -join "`n")
+        Test-Check "$ring/windows-installer.ps1 -help is the dev help minus the internal options" $same 'the positive and negative help texts differ'
 
         foreach ($parameter in @('-use_acr', '-pegasus_enabled', '-kevents_replicas', '-sh_monitoring')) {
             $result = Invoke-Built -File $file -Arguments @($parameter, '1', '-help')

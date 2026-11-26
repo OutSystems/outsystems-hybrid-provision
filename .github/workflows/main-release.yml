@@ -34,11 +34,11 @@ jobs:
         run: |
           RINGS=("dev" "test" "stage" "ea" "ga")
 
-          # tools/build-ring.sh sets the ring and, for ea and ga, removes the internal options and registry aliases
+          # dev, test and stage are built from scripts/negative, ea and ga from scripts/positive (no internal options)
           for ring in "${RINGS[@]}"; do
             echo "Processing ring: $ring"
             for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
-              tools/build-ring.sh "$ring" "scripts/$script" "ring-scripts/$ring/$script"
+              tools/build-ring.sh "$ring" "$script" "ring-scripts/$ring/$script"
             done
           done
 

@@ -1,7 +1,9 @@
 name: Ring Scripts Check
 
-# Builds the installer of every ring and checks what each ring ships. ea and ga must not contain the internal
-# options, variables or registry aliases; dev, test and stage must keep them. See tools/test-rings.sh.
+# Builds the installer of every ring (dev/test/stage from scripts/negative, ea/ga from scripts/positive) and checks
+# what each ring ships. ea and ga must not contain the internal options, variables or registry aliases; dev, test
+# and stage must keep them; the two folders must not drift apart in the help text and the helm flags. See
+# tools/test-rings.sh.
 
 on:
   pull_request:
@@ -34,9 +36,9 @@ jobs:
           mkdir -p ring-build
           cp -r "$BUILD"/. ring-build/
           {
-            echo "## What the ga build removes compared to dev"
+            echo "## scripts/positive (ea, ga) compared to scripts/negative (dev, test, stage)"
             echo
-            echo "Lines starting with \`-\` exist in the dev/test/stage scripts and are **not** in the ea/ga scripts a customer downloads."
+            echo "Lines starting with \`-\` exist in the dev/test/stage scripts and are **not** in the ea/ga scripts a customer downloads. Lines starting with \`+\` exist only in the ea/ga scripts."
             for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
               echo
               echo "<details><summary>$script</summary>"
