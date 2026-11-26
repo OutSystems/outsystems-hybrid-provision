@@ -933,7 +933,7 @@ show_configuration() {
     echo ""
     echo "=== Configuration Summary ==="
     echo "Script Version: $SCRIPT_VERSION"
-    echo "Platform:       macOS"
+    echo "Platform:       Linux"
     echo "Operation:      $OPERATION"
     echo "Environment:    $ENV"
     if [[ "$OPERATION" == "install" ]]; then
