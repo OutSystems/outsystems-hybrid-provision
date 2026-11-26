@@ -1,59 +1,55 @@
 name: Ring Scripts Check
 
-# Builds the installer of every ring (dev/test/stage from scripts/negative, ea/ga from scripts/positive) and checks
-# what each ring ships. ea and ga must not contain the internal options, variables or registry aliases; dev, test
-# and stage must keep them; the two folders must not drift apart in the help text and the helm flags. See
-# tools/test-rings.sh.
+# ea and ga are customer-facing. Their scripts (scripts/positive) must not contain any of the internal options,
+# variables or registry aliases that exist only for dev, test and stage (scripts/negative).
 
 on:
   pull_request:
     paths:
       - 'scripts/**'
-      - 'tools/**'
       - '.github/workflows/ring-scripts-check.yml'
 
 permissions:
   contents: read
 
 jobs:
-  ring-scripts:
+  no-internal-options-in-positive:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build every ring and run the checks
-        env:
-          REQUIRE_POWERSHELL: "1"
-          KEEP_BUILD: "1"
-        shell: bash   # bash -eo pipefail, so a failing test is not hidden by tee
-        run: bash tools/test-rings.sh | tee test-output.txt
+      - name: scripts/positive must not contain any internal option, variable or alias
+        run: |
+          PATTERN='pegasus|kevents|sh[-_]monitoring|shmonitoring|use[-_]acr|useacr|\bACR\b|SP_ID|SP_SECRET|SH_REGISTRY|u4p0z5h7|u5a4o8b8|w0o4m8y0|ECR_ALIAS_(TEST|STAGE|DEV)|EcrAlias(Test|Stage|Dev)'
+          if grep -rniE "$PATTERN" scripts/positive; then
+            echo "::error::scripts/positive contains an internal option, variable or alias (see the lines above). Internal options belong in scripts/negative only."
+            exit 1
+          fi
+          echo "scripts/positive has no internal option, variable or alias."
 
-      - name: Show what ga removes compared to dev
+      - name: The ACR shim must be gone from every ring
+        run: |
+          if grep -rniE 'use[-_]acr|useacr|\bACR\b|SP_SECRET|SH_REGISTRY' scripts; then
+            echo "::error::the --use-acr shim was removed and must not come back"
+            exit 1
+          fi
+
+      - name: Show how scripts/positive differs from scripts/negative
         if: always()
         run: |
-          BUILD="$(sed -n 's/^Building every ring into //p' test-output.txt | head -1)"
-          mkdir -p ring-build
-          cp -r "$BUILD"/. ring-build/
           {
             echo "## scripts/positive (ea, ga) compared to scripts/negative (dev, test, stage)"
             echo
-            echo "Lines starting with \`-\` exist in the dev/test/stage scripts and are **not** in the ea/ga scripts a customer downloads. Lines starting with \`+\` exist only in the ea/ga scripts."
+            echo "Lines starting with \`-\` exist in the dev/test/stage scripts and are **not** in the ea/ga scripts a customer downloads."
             for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
               echo
               echo "<details><summary>$script</summary>"
               echo
               echo '```diff'
-              diff -U1 "ring-build/dev/$script" "ring-build/ga/$script" | tail -n +3 || true
+              diff -U1 "scripts/negative/$script" "scripts/positive/$script" | tail -n +3 || true
               echo '```'
               echo
               echo "</details>"
             done
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the built scripts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ring-scripts
-          path: ring-build

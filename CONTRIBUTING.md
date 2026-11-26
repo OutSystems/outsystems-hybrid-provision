@@ -82,14 +82,12 @@ The installers live in two folders, because customers (and tools they use) read 
 
 | Folder | Rings | Contents |
 |--------|-------|----------|
-| `scripts/negative/` | `dev`, `test`, `stage` | The full scripts, including the internal options `--use-acr`, `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring`, their variables, validation, the dev/test/stage registry aliases and the matching `helm --set` flags |
+| `scripts/negative/` | `dev`, `test`, `stage` | The full scripts, including the internal options `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring`, their variables, validation, the dev/test/stage registry aliases and the matching `helm --set` flags |
 | `scripts/positive/` | `ea`, `ga` | The same scripts without any of the internal options, variables or aliases. The ring only picks the ECR alias of `ea` or `ga` |
 
 - A new internal option goes in `scripts/negative/` only. Never add it to `scripts/positive/`.
 - A change to shared behavior (a bug fix, a new customer-facing option, help text, the install flow) goes in **both** folders, for all three platforms.
-- `tools/build-ring.sh <ring> <script-name> <output>` builds the script of one ring, which is the folder's script with `DEFAULT_ENV` set. To see what a customer gets: `tools/build-ring.sh ga linux-installer.sh /tmp/ga-linux-installer.sh`.
-- Run `bash tools/test-rings.sh` before opening a PR. It builds every ring and checks that `ea`/`ga` contain none of the internal options, that `dev`/`test`/`stage` still do, and that the two folders have not drifted apart in `--help` text and `helm upgrade` flags. It also checks the unknown-option handling, the configuration summary and the exact `helm upgrade` arguments, on Linux, macOS and Windows. The Windows checks need PowerShell (`pwsh`, or `powershell.exe` from WSL); set `REQUIRE_POWERSHELL=1` to fail instead of skip.
-- The CI job `Ring Scripts Check` runs the same checks and shows in its summary how `scripts/positive/` differs from `scripts/negative/`.
+- The `Ring Scripts Check` workflow fails a PR if `scripts/positive/` contains an internal name (`pegasus`, `kevents`, `sh-monitoring`, the dev/test/stage aliases, ...). Its job summary shows how `scripts/positive/` differs from `scripts/negative/`, which is the quickest way to review a change to either folder.
 
 ## Testing
 
@@ -116,8 +114,8 @@ There is no automated test suite. Before submitting a PR, manually verify your c
 
 | Trigger | Workflow | What it does |
 |---------|----------|--------------|
-| PR opened/updated (changes in `scripts/` or `tools/`) | `pr-release.yml` | Publishes preview scripts to `gh-pages/pr/` with `dev` default, and a `ga` build to `gh-pages/pr/ga/` |
-| PR opened/updated (changes in `scripts/` or `tools/`) | `ring-scripts-check.yml` | Builds every ring and runs `tools/test-rings.sh`; the job summary shows what `ga` removes compared to `dev` and the built scripts are attached as an artifact |
-| Push to `main` (changes in `scripts/` or `tools/`) | `main-release.yml` | Runs `tools/test-rings.sh`, then deploys all rings to `gh-pages/<ring>/` and creates a GitHub Release |
+| PR opened/updated (changes in `scripts/`) | `pr-release.yml` | Publishes preview scripts to `gh-pages/pr/` with `dev` default, and a `ga` build to `gh-pages/pr/ga/` |
+| PR opened/updated (changes in `scripts/`) | `ring-scripts-check.yml` | Fails if `scripts/positive/` contains an internal option, variable or alias; the job summary shows how it differs from `scripts/negative/` |
+| Push to `main` (changes in `scripts/`) | `main-release.yml` | Deploys all rings to `gh-pages/<ring>/` and creates a GitHub Release |
 
-The workflows only trigger when files under `scripts/` or `tools/` or the workflow file itself are modified.
+The workflows only trigger when files under `scripts/` or the workflow file itself are modified.

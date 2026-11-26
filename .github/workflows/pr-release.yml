@@ -5,7 +5,6 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'scripts/**'
-      - 'tools/**'
       - '.github/workflows/pr-release.yml'
 
 permissions:
@@ -25,12 +24,21 @@ jobs:
 
       - name: Prepare scripts with dev default and a ga preview
         run: |
-          for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
-            # dev: from scripts/negative, with the internal options (what the PR preview has always been)
-            tools/build-ring.sh dev "$script" "pr-scripts/$script"
-            # ga: from scripts/positive, what a customer gets, without the internal options
-            tools/build-ring.sh ga "$script" "pr-scripts/ga/$script"
-          done
+          mkdir -p pr-scripts pr-scripts/ga
+
+          # dev preview: from scripts/negative, with the internal options (what the PR preview has always been)
+          cp scripts/negative/linux-installer.sh pr-scripts/linux-installer.sh
+          cp scripts/negative/macos-installer.sh pr-scripts/macos-installer.sh
+          cp scripts/negative/windows-installer.ps1 pr-scripts/windows-installer.ps1
+          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/linux-installer.sh pr-scripts/macos-installer.sh
+          sed -i 's/\$Script:DefaultEnv = "[^"]*"/$Script:DefaultEnv = "dev"/' pr-scripts/windows-installer.ps1
+
+          # ga preview: from scripts/positive, what a customer gets, without the internal options
+          cp scripts/positive/linux-installer.sh pr-scripts/ga/linux-installer.sh
+          cp scripts/positive/macos-installer.sh pr-scripts/ga/macos-installer.sh
+          cp scripts/positive/windows-installer.ps1 pr-scripts/ga/windows-installer.ps1
+          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="ga"/' pr-scripts/ga/linux-installer.sh pr-scripts/ga/macos-installer.sh
+          sed -i 's/\$Script:DefaultEnv = "[^"]*"/$Script:DefaultEnv = "ga"/' pr-scripts/ga/windows-installer.ps1
 
       - name: Checkout gh-pages
         uses: actions/checkout@v4
