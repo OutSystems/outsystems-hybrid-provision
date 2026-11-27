@@ -12,17 +12,10 @@ CHART_NAME="self-hosted-operator"
 IMAGE_NAME="self-hosted-operator"
 DEFAULT_ENV="ga" # Default environment as per the release state. Change this value as release progress.
 DEFAULT_OPERATION="install"
-DEFAULT_USE_ACR="false"  # Temporary backward compatibility for Azure ACR
-DEFAULT_PEGASUS_ENABLED="false"  # Enable Pegasus features
-DEFAULT_KEVENTS_REPLICAS="0"  # Number of Kevents replicas (0 or 1) - Used to push Kubernetes events to Grafana
-DEFAULT_SH_MONITORING="false"  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
 
 # Environment-specific settings
 ECR_ALIAS_GA="j0s5s8b0/ga"    # GA ECR alias
 ECR_ALIAS_EA="m5i8c6m7/ea"    # EA ECR alias
-ECR_ALIAS_TEST="u4p0z5h7/test"  # Test ECR alias
-ECR_ALIAS_STAGE="u5a4o8b8/stage"  # Stage ECR alias
-ECR_ALIAS_DEV="w0o4m8y0/dev"  # Dev ECR alias
 PUB_REGISTRY="public.ecr.aws"
 
 # kubectl version configuration
@@ -34,10 +27,6 @@ KUBECTL_VERSION="v1.34.0"  # Compatible with K8s 1.33-1.35
 SHO_VERSION=""
 ENV="$DEFAULT_ENV"
 OPERATION="$DEFAULT_OPERATION"
-USE_ACR="$DEFAULT_USE_ACR"
-PEGASUS_ENABLED="$DEFAULT_PEGASUS_ENABLED"
-KEVENTS_REPLICAS="$DEFAULT_KEVENTS_REPLICAS"
-SH_MONITORING="$DEFAULT_SH_MONITORING"
 
 # Derived configuration (set by setup_environment)
 ECR_ALIAS=""
@@ -81,13 +70,6 @@ ${SCRIPT_NAME} v${SCRIPT_VERSION} - OutSystems Self-Hosted Operator for Linux
 OPTIONS:
     --version=VERSION        SHO version to install/manage (default: latest)
     --operation=OPERATION   Operation: install, uninstall, get-console-url (default: install)
-    --use-acr=BOOLEAN       Use ACR registry: true, false (default: false)
-                           [TEMPORARY: Backward compatibility for Azure ACR]
-    --pegasus-enabled=BOOLEAN  Enable Pegasus features: true, false (default: false)
-                              Note: Only supported in test environment
-    --kevents-replicas=NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
-    --sh-monitoring=BOOLEAN  Enable self-hosted monitoring alerts: true, false (default: false)
-                              Note: Currently enabled only in the test cluster, where Pegasus is also enabled
     --help, -h              Show this help message
 
 OPERATIONS:
@@ -123,11 +105,11 @@ validate_arguments() {
     
     # Validate environment
     case "$ENV" in
-        ga|ea|stage|test|dev)
+        ga|ea)
             log_success "Environment '$ENV' is valid"
             ;;
         *)
-            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea"
             return 1
             ;;
     esac
@@ -157,52 +139,6 @@ validate_arguments() {
         log_success "Version '$SHO_VERSION' format is valid"
     fi
     
-    # Validate Pegasus configuration
-    if [[ "$PEGASUS_ENABLED" == "true" && "$ENV" != "test" ]]; then
-        log_error "Pegasus features (--pegasus-enabled=true) are only supported in 'test' environment"
-        log_info "Current environment: $ENV"
-        return 1
-    fi
-
-    # Validate Kevents replicas configuration
-    if [[ "$KEVENTS_REPLICAS" != "0" && "$KEVENTS_REPLICAS" != "1" ]]; then
-        log_error "Invalid value for kevents-replicas: '$KEVENTS_REPLICAS'. Must be 0 or 1"
-        return 1
-    fi
-
-    # Validate SH monitoring configuration
-    if [[ "$SH_MONITORING" != "true" && "$SH_MONITORING" != "false" ]]; then
-        log_error "Invalid value for sh-monitoring: '$SH_MONITORING'. Must be true or false"
-        return 1
-    fi
-    
-    # Validate ACR configuration only for install operation
-    if [[ "$USE_ACR" == "true" ]]; then
-        if [[ "$OPERATION" == "install" ]]; then
-            log_step "Validating ACR configuration..."
-            local missing_vars=()
-            if [[ -z "${SP_ID}" ]]; then
-                missing_vars+=("SP_ID")
-            fi
-            if [[ -z "${SP_SECRET}" ]]; then
-                missing_vars+=("SP_SECRET")
-            fi
-            if [[ -z "${SH_REGISTRY}" ]]; then
-                missing_vars+=("SH_REGISTRY")
-            fi
-            if [[ ${#missing_vars[@]} -gt 0 ]]; then
-                log_error "Missing required environment variables for ACR: ${missing_vars[*]}"
-                log_info "Please set the following environment variables:"
-                for var in "${missing_vars[@]}"; do
-                    log_info "  export $var=<value>"
-                done
-                return 1
-            fi
-            log_success "ACR configuration is valid"
-        else
-            log_info "Skipping ACR configuration validation (not required for operation: $OPERATION)"
-        fi
-    fi
     
     return 0
 }
@@ -218,70 +154,6 @@ parse_arguments() {
             --operation=*)
                 OPERATION="${1#*=}"
                 log_info "Operation specified: $OPERATION"
-                ;;
-            --use-acr=*)
-                USE_ACR="${1#*=}"
-                # Normalize boolean values
-                case "$(echo "${USE_ACR}" | tr '[:upper:]' '[:lower:]')" in
-                    true|1|yes|on)
-                        USE_ACR="true"
-                        log_info "ACR registry mode enabled"
-                        ;;
-                    false|0|no|off)
-                        USE_ACR="false"
-                        ;;
-                    *)
-                        log_error "Invalid value for --use-acr: '$USE_ACR'. Must be true or false"
-                        exit 1
-                        ;;
-                esac
-                ;;
-            --use-acr)
-                # Support flag without value (defaults to true for backward compatibility)
-                USE_ACR="true"
-                log_info "ACR registry mode enabled"
-                ;;
-            --pegasus-enabled=*)
-                PEGASUS_ENABLED="${1#*=}"
-                # Normalize boolean values
-                case "$(echo "${PEGASUS_ENABLED}" | tr '[:upper:]' '[:lower:]')" in
-                    true|1|yes|on)
-                        PEGASUS_ENABLED="true"
-                        log_info "Pegasus features enabled"
-                        ;;
-                    false|0|no|off)
-                        PEGASUS_ENABLED="false"
-                        ;;
-                    *)
-                        log_error "Invalid value for --pegasus-enabled: '$PEGASUS_ENABLED'. Must be true or false"
-                        exit 1
-                        ;;
-                esac
-                ;;
-            --kevents-replicas=*)
-                KEVENTS_REPLICAS="${1#*=}"
-                if [[ "$KEVENTS_REPLICAS" != "0" && "$KEVENTS_REPLICAS" != "1" ]]; then
-                    log_error "Invalid value for --kevents-replicas: '$KEVENTS_REPLICAS'. Must be 0 or 1"
-                    exit 1
-                fi
-                log_info "Kevents replicas set to: $KEVENTS_REPLICAS"
-                ;;
-            --sh-monitoring=*)
-                SH_MONITORING="${1#*=}"
-                # Normalize boolean values
-                case "$(echo "${SH_MONITORING}" | tr '[:upper:]' '[:lower:]')" in
-                    true|1|yes|on)
-                        SH_MONITORING="true"
-                        log_info "Self-hosted monitoring enabled"
-                        ;;
-                    false|0|no|off)
-                        SH_MONITORING="false"
-                        ;;
-                    *)
-                        log_error "Invalid value for --sh-monitoring: '$SH_MONITORING'. Must be true or false"
-                        exit 1
-                        ;;
-                esac
                 ;;
             --help|-h)
                 show_usage
@@ -311,20 +183,8 @@ setup_environment() {
             ECR_ALIAS="$ECR_ALIAS_EA"
             log_info "Using EA ECR alias: $ECR_ALIAS"
             ;;
-        test)
-            ECR_ALIAS="$ECR_ALIAS_TEST"
-            log_info "Using Test ECR alias: $ECR_ALIAS"
-            ;;
-        stage)
-            ECR_ALIAS="$ECR_ALIAS_STAGE"
-            log_info "Using Stage ECR alias: $ECR_ALIAS"
-            ;;
-        dev)
-            ECR_ALIAS="$ECR_ALIAS_DEV"
-            log_info "Using Dev ECR alias: $ECR_ALIAS"
-            ;;
         *)
-            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea, stage, test, dev"
+            log_error "Invalid environment: '$ENV'. Must be one of: ga, ea"
             exit 1
             ;;
     esac
@@ -592,36 +452,14 @@ sho_install() {
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     
     local install_output
-    if [[ "$USE_ACR" == "true" ]]; then
-        log_info "Installing with ACR registry configuration"
-        install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
-            --namespace "$NAMESPACE" \
-            --create-namespace \
-            --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
-            --set "image.repository=${IMAGE_NAME}" \
-            --set "image.tag=v${SHO_VERSION}" \
-            --set-string "podAnnotations.timestamp=$timestamp" \
-            --set "ring=$ENV" \
-            --set "registry.url=${SH_REGISTRY}" \
-            --set "registry.username=${SP_ID}" \
-            --set "registry.password=${SP_SECRET}" \
-            --set "enableECR.enabled=false" \
-            --set "pegasusEnabled=$PEGASUS_ENABLED" \
-            --set "keventsReplicas=$KEVENTS_REPLICAS" \
-            --set "shMonitoring=$SH_MONITORING" 2>&1)
-    else
-        install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
-            --namespace "$NAMESPACE" \
-            --create-namespace \
-            --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
-            --set "image.repository=${IMAGE_NAME}" \
-            --set "image.tag=v${SHO_VERSION}" \
-            --set-string "podAnnotations.timestamp=$timestamp" \
-            --set "ring=$ENV" \
-            --set "pegasusEnabled=$PEGASUS_ENABLED" \
-            --set "keventsReplicas=$KEVENTS_REPLICAS" \
-            --set "shMonitoring=$SH_MONITORING" 2>&1)
-    fi
+    install_output=$(helm upgrade --install "${CHART_NAME}" "${chart_file}" \
+        --namespace "$NAMESPACE" \
+        --create-namespace \
+        --set "image.registry=${PUB_REGISTRY}/${IMAGE_REGISTRY}" \
+        --set "image.repository=${IMAGE_NAME}" \
+        --set "image.tag=v${SHO_VERSION}" \
+        --set-string "podAnnotations.timestamp=$timestamp" \
+        --set "ring=$ENV" 2>&1)
     
     if [[ $? -eq 0 ]]; then
         log_success "OutSystems Self-Hosted Operator installed successfully!"
@@ -917,14 +755,11 @@ show_configuration() {
     echo ""
     echo "=== Configuration Summary ==="
     echo "Script Version: $SCRIPT_VERSION"
-    echo "Platform:       macOS"
+    echo "Platform:       Linux"
     echo "Operation:      $OPERATION"
     echo "Environment:    $ENV"
     if [[ "$OPERATION" == "install" ]]; then
         echo "Version:        ${SHO_VERSION:-latest}"
-        echo "Use ACR:        $USE_ACR"
-        echo "Kevents Replicas: $KEVENTS_REPLICAS"
-        echo "SH Monitoring:  $SH_MONITORING"
     fi
     echo "Namespace:      $NAMESPACE"
     echo "Chart Name:     $CHART_NAME"
