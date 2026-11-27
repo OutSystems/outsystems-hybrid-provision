@@ -220,6 +220,22 @@ function Test-Command {
     return (Get-Command $CommandName -ErrorAction SilentlyContinue) -ne $null
 }
 
+# Function to pick up PATH entries added after this window was opened. A tool installed by an
+# earlier run (for example Helm in C:\Program Files\helm) is in the machine PATH but not in this
+# window's PATH, so without this it is reported as missing and downloaded again.
+function Update-SessionPath {
+    $sessionEntries = @($env:PATH -split ';' | Where-Object { $_ })
+    $registryPath = (@([Environment]::GetEnvironmentVariable("PATH", "Machine"),
+                       [Environment]::GetEnvironmentVariable("PATH", "User")) -join ';')
+    foreach ($entry in ($registryPath -split ';')) {
+        $expandedEntry = [Environment]::ExpandEnvironmentVariables($entry)
+        if ($expandedEntry -and ($sessionEntries -notcontains $expandedEntry)) {
+            $env:PATH += ";$expandedEntry"
+            $sessionEntries += $expandedEntry
+        }
+    }
+}
+
 # Function to install Chocolatey
 function Install-Chocolatey {
     Write-LogStep "Installing Chocolatey package manager..."
@@ -381,7 +397,9 @@ function Install-Helm {
 function Test-Dependencies {
     Write-LogStep "Checking dependencies for Windows..."
     $allDepsOk = $true
-    
+
+    Update-SessionPath
+
     # Check if running as Administrator
     $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
