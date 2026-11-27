@@ -1,0 +1,55 @@
+name: Ring Scripts Check
+
+# ea and ga are customer-facing. Their scripts (scripts/positive) must not contain any of the internal options,
+# variables or registry aliases that exist only for dev, test and stage (scripts/negative).
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/ring-scripts-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-internal-options-in-positive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: scripts/positive must not contain any internal option, variable or alias
+        run: |
+          PATTERN='pegasus|kevents|sh[-_]monitoring|shmonitoring|use[-_]acr|useacr|\bACR\b|SP_ID|SP_SECRET|SH_REGISTRY|u4p0z5h7|u5a4o8b8|w0o4m8y0|ECR_ALIAS_(TEST|STAGE|DEV)|EcrAlias(Test|Stage|Dev)'
+          if grep -rniE "$PATTERN" scripts/positive; then
+            echo "::error::scripts/positive contains an internal option, variable or alias (see the lines above). Internal options belong in scripts/negative only."
+            exit 1
+          fi
+          echo "scripts/positive has no internal option, variable or alias."
+
+      - name: The ACR shim must be gone from every ring
+        run: |
+          if grep -rniE 'use[-_]acr|useacr|\bACR\b|SP_SECRET|SH_REGISTRY' scripts; then
+            echo "::error::the --use-acr shim was removed and must not come back"
+            exit 1
+          fi
+
+      - name: Show how scripts/positive differs from scripts/negative
+        if: always()
+        run: |
+          {
+            echo "## scripts/positive (ea, ga) compared to scripts/negative (dev, test, stage)"
+            echo
+            echo "Lines starting with \`-\` exist in the dev/test/stage scripts and are **not** in the ea/ga scripts a customer downloads."
+            for script in linux-installer.sh macos-installer.sh windows-installer.ps1; do
+              echo
+              echo "<details><summary>$script</summary>"
+              echo
+              echo '```diff'
+              diff -U1 "scripts/negative/$script" "scripts/positive/$script" | tail -n +3 || true
+              echo '```'
+              echo
+              echo "</details>"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -58,7 +58,7 @@ RDSHDT-1980: Support Pegasus Flag
 ### Pull requests
 
 1. Create a branch from `main` using the naming convention above.
-2. Make changes to the relevant scripts in `scripts/`.
+2. Make changes to the relevant scripts in `scripts/negative/` and `scripts/positive/` (see [Two script folders](#two-script-folders)).
 3. Open a PR targeting `main`.
 4. The **PR Preview Release** workflow automatically publishes your modified scripts to the `gh-pages` branch under the `pr/` directory with `DEFAULT_ENV` set to `dev`. A bot comment provides curl/irm one-liners you can use to test.
 5. After review and merge, the **Main Branch Ring Deployment** workflow deploys scripts across all environment rings (dev, test, ea, ga) and creates a GitHub Release.
@@ -75,6 +75,19 @@ The installer scripts support four environment rings, each pointing to a differe
 | `ga` | General Availability (production default) |
 
 The `DEFAULT_ENV` variable in each script controls which ring is used by default. CI modifies this value per ring during deployment -- do not hardcode ring-specific values in the source scripts.
+
+### Two script folders
+
+The installers live in two folders, because customers (and tools they use) read the scripts they download:
+
+| Folder | Rings | Contents |
+|--------|-------|----------|
+| `scripts/negative/` | `dev`, `test`, `stage` | The full scripts, including the internal options `--pegasus-enabled`, `--kevents-replicas`, `--sh-monitoring`, their variables, validation, the dev/test/stage registry aliases and the matching `helm --set` flags |
+| `scripts/positive/` | `ea`, `ga` | The same scripts without any of the internal options, variables or aliases. The ring only picks the ECR alias of `ea` or `ga` |
+
+- A new internal option goes in `scripts/negative/` only. Never add it to `scripts/positive/`.
+- A change to shared behavior (a bug fix, a new customer-facing option, help text, the install flow) goes in **both** folders, for all three platforms.
+- The `Ring Scripts Check` workflow fails a PR if `scripts/positive/` contains an internal name (`pegasus`, `kevents`, `sh-monitoring`, the dev/test/stage aliases, ...). Its job summary shows how `scripts/positive/` differs from `scripts/negative/`, which is the quickest way to review a change to either folder.
 
 ## Testing
 
@@ -101,7 +114,8 @@ There is no automated test suite. Before submitting a PR, manually verify your c
 
 | Trigger | Workflow | What it does |
 |---------|----------|--------------|
-| PR opened/updated (changes in `scripts/`) | `pr-release.yml` | Publishes preview scripts to `gh-pages/pr/` with `dev` default |
+| PR opened/updated (changes in `scripts/`) | `pr-release.yml` | Publishes preview scripts to `gh-pages/pr/` with `dev` default, and a `ga` build to `gh-pages/pr/ga/` |
+| PR opened/updated (changes in `scripts/`) | `ring-scripts-check.yml` | Fails if `scripts/positive/` contains an internal option, variable or alias; the job summary shows how it differs from `scripts/negative/` |
 | Push to `main` (changes in `scripts/`) | `main-release.yml` | Deploys all rings to `gh-pages/<ring>/` and creates a GitHub Release |
 
-Both workflows only trigger when files under `scripts/` or the workflow file itself are modified.
+The workflows only trigger when files under `scripts/` or the workflow file itself are modified.

@@ -22,21 +22,23 @@ jobs:
         id: pr
         run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
-      - name: Prepare scripts with dev default
+      - name: Prepare scripts with dev default and a ga preview
         run: |
-          mkdir -p pr-scripts
-          
-          # Process linux-installer.sh
-          cp scripts/linux-installer.sh pr-scripts/linux-installer.sh
-          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/linux-installer.sh
-          
-          # Process macos-installer.sh
-          cp scripts/macos-installer.sh pr-scripts/macos-installer.sh
-          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/macos-installer.sh
-          
-          # Process windows-installer.ps1
-          cp scripts/windows-installer.ps1 pr-scripts/windows-installer.ps1
+          mkdir -p pr-scripts pr-scripts/ga
+
+          # dev preview: from scripts/negative, with the internal options (what the PR preview has always been)
+          cp scripts/negative/linux-installer.sh pr-scripts/linux-installer.sh
+          cp scripts/negative/macos-installer.sh pr-scripts/macos-installer.sh
+          cp scripts/negative/windows-installer.ps1 pr-scripts/windows-installer.ps1
+          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="dev"/' pr-scripts/linux-installer.sh pr-scripts/macos-installer.sh
           sed -i 's/\$Script:DefaultEnv = "[^"]*"/$Script:DefaultEnv = "dev"/' pr-scripts/windows-installer.ps1
+
+          # ga preview: from scripts/positive, what a customer gets, without the internal options
+          cp scripts/positive/linux-installer.sh pr-scripts/ga/linux-installer.sh
+          cp scripts/positive/macos-installer.sh pr-scripts/ga/macos-installer.sh
+          cp scripts/positive/windows-installer.ps1 pr-scripts/ga/windows-installer.ps1
+          sed -i 's/^DEFAULT_ENV="[^"]*"/DEFAULT_ENV="ga"/' pr-scripts/ga/linux-installer.sh pr-scripts/ga/macos-installer.sh
+          sed -i 's/\$Script:DefaultEnv = "[^"]*"/$Script:DefaultEnv = "ga"/' pr-scripts/ga/windows-installer.ps1
 
       - name: Checkout gh-pages
         uses: actions/checkout@v4
@@ -50,6 +52,8 @@ jobs:
           cp pr-scripts/linux-installer.sh gh-pages/pr/
           cp pr-scripts/macos-installer.sh gh-pages/pr/
           cp pr-scripts/windows-installer.ps1 gh-pages/pr/
+          mkdir -p gh-pages/pr/ga
+          cp pr-scripts/ga/* gh-pages/pr/ga/
           
           cd gh-pages
           git config user.name "github-actions[bot]"
@@ -63,7 +67,7 @@ jobs:
         with:
           script: |
             const prNumber = ${{ steps.pr.outputs.number }};
-            const repoUrl = 'https://outsystems.github.io/outsystems-hybrid-provision';
+            const repoUrl = 'https://outsystems.github.io/outsystems-selfhosted-provision';
             
             const comment = `## 🚀 PR Preview Scripts Available
             
@@ -84,7 +88,12 @@ jobs:
             irm ${repoUrl}/pr/windows-installer.ps1 | iex
             \`\`\`
 
-            **Default Environment:** dev`;
+            **Default Environment:** dev
+
+            ### What a customer gets (ga build, without the internal options):
+            - **Linux**: \`${repoUrl}/pr/ga/linux-installer.sh\`
+            - **macOS**: \`${repoUrl}/pr/ga/macos-installer.sh\`
+            - **Windows**: \`${repoUrl}/pr/ga/windows-installer.ps1\``;
             
             github.rest.issues.createComment({
               issue_number: prNumber,

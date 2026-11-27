@@ -6,14 +6,11 @@ param(
     [ValidateSet("install", "uninstall", "get-console-url", "stop-port-forward")]
     [string]$operation = "install",
     [ValidateSet("true", "false")]
-    [string]$use_acr = "false",  # Temporary backward compatibility for Azure ACR
-    [ValidateSet("true", "false")]
     [string]$pegasus_enabled = "false",  # Enable Pegasus features
     [ValidateSet("0", "1")]
     [string]$kevents_replicas = "0",  # Number of Kevents replicas - Used to push Kubernetes events to Grafana
     [ValidateSet("true", "false")]
     [string]$sh_monitoring = "false",  # Enable self-hosted monitoring alerts - Currently enabled only in the test cluster, where Pegasus is also enabled
-    [switch]$UseAcr,
     [Alias("h")]
     [switch]$help,
     # Without CmdletBinding, PowerShell's "simple" binding silently absorbs an unrecognized
@@ -55,7 +52,6 @@ $Script:KubectlVersion = "v1.34.0"  # Compatible with K8s 1.33-1.35
 $Script:ShoVersion = $version
 $Script:Env = $Script:DefaultEnv
 $Script:Op = $operation
-$Script:UseAcr = if ($UseAcr.IsPresent) { $true } elseif ($use_acr -eq "true") { $true } else { $false }
 $Script:PegasusEnabled = if ($pegasus_enabled -eq "true") { $true } else { $false }
 $Script:KeventsReplicas = [int]$kevents_replicas
 $Script:ShMonitoring = if ($sh_monitoring -eq "true") { $true } else { $false }
@@ -113,8 +109,6 @@ OPTIONS:
 
     -version VERSION        SHO version to install/manage (format: x.y.z, e.g., 0.2.3). If not provided, the latest available version will be used.
     -operation OPERATION    Operation: install, uninstall, get-console-url (default: install)
-    -use-acr BOOLEAN        Use ACR registry: true, false (default: false)
-                             [TEMPORARY: Backward compatibility for Azure ACR]
     -pegasus_enabled BOOLEAN  Enable Pegasus features: true, false (default: false)
                               Note: Only supported in test environment
     -kevents_replicas NUMBER  Number of Kevents replicas: 0, 1 (default: 0)
@@ -168,34 +162,6 @@ function Test-Arguments {
             return $false
         }
         Write-LogSuccess "Version '$Script:ShoVersion' format is valid"
-    }
-
-    # Validate ACR configuration only for install operation
-    if ($Script:UseAcr) {
-        if ($Script:Op -eq "install") {
-            Write-LogStep "Validating ACR configuration..."
-            $missingVars = @()
-            if (-not $env:SP_ID) {
-                $missingVars += "SP_ID"
-            }
-            if (-not $env:SP_SECRET) {
-                $missingVars += "SP_SECRET"
-            }
-            if (-not $env:SH_REGISTRY) {
-                $missingVars += "SH_REGISTRY"
-            }
-            if ($missingVars.Count -gt 0) {
-                Write-LogError "Missing required environment variables for ACR: $($missingVars -join ', ')"
-                Write-LogInfo "Please set the following environment variables:"
-                foreach ($var in $missingVars) {
-                    Write-LogInfo "  `$env:$var = '<value>'"
-                }
-                return $false
-            }
-            Write-LogSuccess "ACR configuration is valid"
-        } else {
-            Write-LogInfo "Skipping ACR configuration validation (not required for operation: $($Script:Op))"
-        }
     }
 
     # Temporarily disable uninstall operation
@@ -614,16 +580,6 @@ function Install-Sho {
             Write-LogError "Pegasus features (-pegasus_enabled true) are only supported in 'test' environment"
             Write-LogInfo "Current environment: $Script:Env"
             return $false
-        }
-        
-        if ($Script:UseAcr) {
-            Write-LogInfo "Installing with ACR registry configuration"
-            $helmArgs += @(
-                "--set", "registry.url=$env:SH_REGISTRY",
-                "--set", "registry.username=$env:SP_ID",
-                "--set", "registry.password=$env:SP_SECRET",
-                "--set", "enableECR.enabled=false"
-            )
         }
         
         # Add pegasusEnabled to helm arguments
@@ -1092,7 +1048,7 @@ Chart Name:     $Script:ChartName
 Repository:     $Script:PubRegistry/$Script:ChartRepository
 Image Registry: $Script:PubRegistry/$Script:ImageRegistry
 $(if ($Script:Op -eq 'install') {
-"Version:        $Script:ShoVersion`nUse ACR:        $Script:UseAcr`nKevents Replicas: $Script:KeventsReplicas`nSH Monitoring:  $($Script:ShMonitoring.ToString().ToLower())"
+"Version:        $Script:ShoVersion`nKevents Replicas: $Script:KeventsReplicas`nSH Monitoring:  $($Script:ShMonitoring.ToString().ToLower())"
 })
 
 "@

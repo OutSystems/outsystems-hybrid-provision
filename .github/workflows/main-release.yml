@@ -27,21 +27,28 @@ jobs:
       - name: Prepare ring-specific scripts
         run: |
           RINGS=("dev" "test" "stage" "ea" "ga")
-          
+
           for ring in "${RINGS[@]}"; do
             echo "Processing ring: $ring"
             mkdir -p "ring-scripts/$ring"
-            
+
+            # dev, test and stage come from scripts/negative (with the internal options),
+            # ea and ga from scripts/positive (without any of them)
+            case "$ring" in
+              ea|ga) folder="positive" ;;
+              *)     folder="negative" ;;
+            esac
+
             # Process linux-installer.sh
-            cp scripts/linux-installer.sh "ring-scripts/$ring/linux-installer.sh"
+            cp "scripts/$folder/linux-installer.sh" "ring-scripts/$ring/linux-installer.sh"
             sed -i "s/^DEFAULT_ENV=\"[^\"]*\"/DEFAULT_ENV=\"$ring\"/" "ring-scripts/$ring/linux-installer.sh"
-            
+
             # Process macos-installer.sh
-            cp scripts/macos-installer.sh "ring-scripts/$ring/macos-installer.sh"
+            cp "scripts/$folder/macos-installer.sh" "ring-scripts/$ring/macos-installer.sh"
             sed -i "s/^DEFAULT_ENV=\"[^\"]*\"/DEFAULT_ENV=\"$ring\"/" "ring-scripts/$ring/macos-installer.sh"
-            
+
             # Process windows-installer.ps1
-            cp scripts/windows-installer.ps1 "ring-scripts/$ring/windows-installer.ps1"
+            cp "scripts/$folder/windows-installer.ps1" "ring-scripts/$ring/windows-installer.ps1"
             sed -i "s/\$Script:DefaultEnv = \"[^\"]*\"/\$Script:DefaultEnv = \"$ring\"/" "ring-scripts/$ring/windows-installer.ps1"
           done
 
